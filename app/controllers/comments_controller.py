@@ -1,63 +1,79 @@
 from fastapi.responses import JSONResponse
-from app.common.responses import ok, created, bad_request, unauthorized, forbidden, not_found, server_error
-from app.common.auth import is_authorized
 
-COMMENTS = {
-    1: [{"comment_id": 1, "content": "nice", "author": "starter"}],
-    2: [],
-}
+from app.common.responses import ok, created, bad_request, unauthorized, not_found, server_error
+from app.common.errors import (
+    UNAUTHORIZED,
+    INVALID_TOKEN,
+    MISSING_REQUIRED_FIELDS,
+    POST_NOT_FOUND,
+    COMMENT_NOT_FOUND,
+    INTERNAL_SERVER_ERROR,
+)
+from app.common.auth import parse_bearer_token
+from app.models import users_model, posts_model, comments_model
 
-def list_comments(post_id: int, authorization: str | None) -> JSONResponse:
+
+def _require_user_id(authorization: str | None) -> int | None:
+    token = parse_bearer_token(authorization)
+    if not token:
+        return None
+    return users_model.get_user_id_by_token(token)
+
+
+def list_comments(authorization: str | None, post_id: int) -> JSONResponse:
     try:
-        if not is_authorized(authorization):
-            return unauthorized("unauthorized")
+        user_id = _require_user_id(authorization)
+        if user_id is None:
+            return unauthorized(UNAUTHORIZED.message)
 
-        items = COMMENTS.get(post_id)
-        if items is None:
-            return not_found("post_not_found")
+        post = posts_model.find_post_by_id(post_id)
+        if post is None:
+            return not_found(POST_NOT_FOUND.message)
 
-        return ok("read_comments_success", {"items": items})
+        data = comments_model.list_comments(post_id=post_id)
+        return ok("read_comments_success", data)
+
     except Exception:
-        return server_error()
+        return server_error(INTERNAL_SERVER_ERROR.message)
 
 
-def create_comment(post_id: int, payload: dict, authorization: str | None) -> JSONResponse:
+def create_comment(authorization: str | None, post_id: int, payload: dict) -> JSONResponse:
     try:
-        if not is_authorized(authorization):
-            return unauthorized("unauthorized")
+        user_id = _require_user_id(authorization)
+        if user_id is None:
+            return unauthorized(UNAUTHORIZED.message)
+
+        post = posts_model.find_post_by_id(post_id)
+        if post is None:
+            return not_found(POST_NOT_FOUND.message)
 
         content = payload.get("content")
         if not content:
-            return bad_request("missing_required_fields")
+            return bad_request(MISSING_REQUIRED_FIELDS.message)
 
-        items = COMMENTS.get(post_id)
-        if items is None:
-            return not_found("post_not_found")
+        comment = comments_model.create_comment(post_id=post_id, author_id=user_id, content=content)
+        return created("comment_created", {"comment_id": comment["id"]})
 
-        new_id = max([c["comment_id"] for c in items], default=0) + 1
-        items.append({"comment_id": new_id, "content": content, "author": "starter"})
-        return created("comment_created", {"comment_id": new_id})
     except Exception:
-        return server_error()
+        return server_error(INTERNAL_SERVER_ERROR.message)
 
 
-def delete_comment(post_id: int, comment_id: int, authorization: str | None) -> JSONResponse:
+def delete_comment(authorization: str | None, post_id: int, comment_id: int) -> JSONResponse:
     try:
-        if not is_authorized(authorization):
-            return unauthorized("unauthorized")
+        user_id = _require_user_id(authorization)
+        if user_id is None:
+            return unauthorized(UNAUTHORIZED.message)
 
-        items = COMMENTS.get(post_id)
-        if items is None:
-            return not_found("post_not_found")
+        post = posts_model.find_post_by_id(post_id)
+        if post is None:
+            return not_found(POST_NOT_FOUND.message)
 
-        target = next((c for c in items if c["comment_id"] == comment_id), None)
-        if target is None:
-            return not_found("comment_not_found")
+        comment = comments_model.find_comment_by_id(comment_id)
+        if comment is None or comment["post_id"] != post_id:
+            return not_found(COMMENT_NOT_FOUND.message)
 
-        if target["author"] != "starter":
-            return forbidden("permission_denied")
+        comments_model.delete_comment(comment_id)
+        return ok("comment_deleted", {"comment_id": comment_id})
 
-        items.remove(target)
-        return ok("comment_deleted", None)
     except Exception:
-        return server_error()
+        return server_error(INTERNAL_SERVER_ERROR.message)

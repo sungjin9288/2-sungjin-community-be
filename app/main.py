@@ -1,8 +1,23 @@
-from fastapi import FastAPI
-from app.routes import users, posts, comments
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+
+from app.routes import router as api_router
+from app.common.responses import bad_request, server_error
+from app.common.errors import INVALID_REQUEST, INTERNAL_SERVER_ERROR
 
 app = FastAPI(title="Community API")
 
-app.include_router(users.router, prefix="/users", tags=["Users"])
-app.include_router(posts.router, prefix="/posts", tags=["Posts"])
-app.include_router(comments.router, tags=["Comments"])
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+ 
+    return bad_request(INVALID_REQUEST.message)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+  
+    return server_error(INTERNAL_SERVER_ERROR.message)
+
+
+app.include_router(api_router)

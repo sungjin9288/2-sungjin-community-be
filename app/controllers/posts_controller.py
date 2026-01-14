@@ -1,103 +1,115 @@
 from fastapi.responses import JSONResponse
-from app.common.responses import ok, created, bad_request, unauthorized, forbidden, not_found, server_error
-from app.common.auth import is_authorized
 
-POSTS = [
-    {"post_id": 1, "title": "welcome", "content": "hi", "author": "starter"},
-    {"post_id": 2, "title": "rules", "content": "be nice", "author": "admin"},
-]
+from app.common.responses import ok, created, bad_request, unauthorized, not_found, server_error
+from app.common.errors import (
+    UNAUTHORIZED,
+    INVALID_TOKEN,
+    PAGE_INVALID,
+    LIMIT_INVALID,
+    TITLE_REQUIRED,
+    CONTENT_REQUIRED,
+    POST_NOT_FOUND,
+    INTERNAL_SERVER_ERROR,
+)
+from app.common.auth import parse_bearer_token
+from app.models import users_model, posts_model
 
-def list_posts(page: int, limit: int, authorization: str | None) -> JSONResponse:
+
+def _require_user_id(authorization: str | None) -> int | None:
+    token = parse_bearer_token(authorization)
+    if not token:
+        return None
+    user_id = users_model.get_user_id_by_token(token)
+    return user_id
+
+
+def list_posts(authorization: str | None, page: int, limit: int) -> JSONResponse:
     try:
-        if not is_authorized(authorization):
-            return unauthorized("unauthorized")
+        user_id = _require_user_id(authorization)
+        if user_id is None:
+            return unauthorized(UNAUTHORIZED.message)
 
-        if page < 1 or limit < 1 or limit > 50:
-            return bad_request("invalid_paging_params")
+        if page < 1:
+            return bad_request(PAGE_INVALID.message)
+        if limit < 1 or limit > 50:
+            return bad_request(LIMIT_INVALID.message)
 
-        start = (page - 1) * limit
-        end = start + limit
-        data = {"page": page, "limit": limit, "items": POSTS[start:end]}
+        data = posts_model.list_posts(page=page, limit=limit)
         return ok("read_posts_success", data)
+
     except Exception:
-        return server_error()
+        return server_error(INTERNAL_SERVER_ERROR.message)
 
 
-def read_post(post_id: int, authorization: str | None) -> JSONResponse:
+def create_post(authorization: str | None, payload: dict) -> JSONResponse:
     try:
-        if not is_authorized(authorization):
-            return unauthorized("unauthorized")
-
-        post = next((p for p in POSTS if p["post_id"] == post_id), None)
-        if post is None:
-            return not_found("post_not_found")
-
-        return ok("read_post_success", post)
-    except Exception:
-        return server_error()
-
-
-def create_post(payload: dict, authorization: str | None) -> JSONResponse:
-    try:
-        if not is_authorized(authorization):
-            return unauthorized("unauthorized")
+        user_id = _require_user_id(authorization)
+        if user_id is None:
+            return unauthorized(UNAUTHORIZED.message)
 
         title = payload.get("title")
         content = payload.get("content")
-        image_url = payload.get("image_url")
+        image = payload.get("image")
 
-        if not title or not content:
-            return bad_request("missing_required_fields")
+        if not title:
+            return bad_request(TITLE_REQUIRED.message)
+        if not content:
+            return bad_request(CONTENT_REQUIRED.message)
 
-        new_id = max(p["post_id"] for p in POSTS) + 1 if POSTS else 1
-        POSTS.append(
-            {"post_id": new_id, "title": title, "content": content, "author": "starter", "image_url": image_url}
-        )
-        return created("post_created", {"post_id": new_id})
+        post = posts_model.create_post(author_id=user_id, title=title, content=content, image=image)
+        return created("post_created", {"post_id": post["id"]})
+
     except Exception:
-        return server_error()
+        return server_error(INTERNAL_SERVER_ERROR.message)
 
 
-def update_post(post_id: int, payload: dict, authorization: str | None) -> JSONResponse:
+def get_post_detail(authorization: str | None, post_id: int) -> JSONResponse:
     try:
-        if not is_authorized(authorization):
-            return unauthorized("unauthorized")
+        user_id = _require_user_id(authorization)
+        if user_id is None:
+            return unauthorized(UNAUTHORIZED.message)
 
-        post = next((p for p in POSTS if p["post_id"] == post_id), None)
+        post = posts_model.find_post_by_id(post_id)
         if post is None:
-            return not_found("post_not_found")
+            return not_found(POST_NOT_FOUND.message)
 
-        if post["author"] != "starter":
-            return forbidden("permission_denied")
+        return ok("read_detail_success", post)
+
+    except Exception:
+        return server_error(INTERNAL_SERVER_ERROR.message)
+
+
+def update_post(authorization: str | None, post_id: int, payload: dict) -> JSONResponse:
+    try:
+        user_id = _require_user_id(authorization)
+        if user_id is None:
+            return unauthorized(UNAUTHORIZED.message)
 
         title = payload.get("title")
         content = payload.get("content")
-        if not title and not content:
-            return bad_request("no_fields_to_update")
+        image = payload.get("image")
 
-        if title:
-            post["title"] = title
-        if content:
-            post["content"] = content
+        updated = posts_model.update_post(post_id=post_id, title=title, content=content, image=image)
+        if updated is None:
+            return not_found(POST_NOT_FOUND.message)
 
-        return ok("post_updated", None)
+        return ok("post_updated", {"post_id": post_id})
+
     except Exception:
-        return server_error()
+        return server_error(INTERNAL_SERVER_ERROR.message)
 
 
-def delete_post(post_id: int, authorization: str | None) -> JSONResponse:
+def delete_post(authorization: str | None, post_id: int) -> JSONResponse:
     try:
-        if not is_authorized(authorization):
-            return unauthorized("unauthorized")
+        user_id = _require_user_id(authorization)
+        if user_id is None:
+            return unauthorized(UNAUTHORIZED.message)
 
-        post = next((p for p in POSTS if p["post_id"] == post_id), None)
-        if post is None:
-            return not_found("post_not_found")
+        ok_deleted = posts_model.delete_post(post_id)
+        if not ok_deleted:
+            return not_found(POST_NOT_FOUND.message)
 
-        if post["author"] != "starter":
-            return forbidden("permission_denied")
+        return ok("post_deleted", {"post_id": post_id})
 
-        POSTS.remove(post)
-        return ok("post_deleted", None)
     except Exception:
-        return server_error()
+        return server_error(INTERNAL_SERVER_ERROR.message)
