@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from fastapi.responses import JSONResponse
 
 from app.common.responses import ok, created, bad_request, unauthorized, conflict, server_error
@@ -41,7 +39,6 @@ def signup(payload: dict) -> JSONResponse:
 
 
 def login(payload: dict) -> JSONResponse:
-
     try:
         email = payload.get("email")
         password = payload.get("password")

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from fastapi.responses import JSONResponse
 
 from app.common.responses import ok, created, bad_request, unauthorized, not_found, server_error

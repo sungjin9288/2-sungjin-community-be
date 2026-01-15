@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from typing import TypedDict, NotRequired
+from typing import Dict, List, Optional
+
+_posts: Dict[int, dict] = {}
+_post_seq: int = 1
 
 _posts: Dict[int, dict] = {}
 _post_seq: int = 1
@@ -15,10 +18,8 @@ def create_post(author_id: int, title: str, content: str, image: Optional[str] =
         "content": content,
         "image": image,
     }
-    if image_url:
-        post["image_url"] = image_url
-    _POSTS.append(post)
-    _next_id += 1
+    _posts[_post_seq] = post
+    _post_seq += 1
     return post
 
 
@@ -46,18 +47,16 @@ def update_post(post_id: int, title: Optional[str], content: Optional[str], imag
     post = _posts.get(post_id)
     if not post:
         return None
+
     if title is not None:
         post["title"] = title
     if content is not None:
         post["content"] = content
-    if image_url is not None:
-        post["image_url"] = image_url
+    if image is not None:
+        post["image"] = image
+
     return post
 
 
 def delete_post(post_id: int) -> bool:
-    idx = next((i for i, p in enumerate(_POSTS) if p["id"] == post_id), None)
-    if idx is None:
-        return False
-    _POSTS.pop(idx)
-    return True
+    return _posts.pop(post_id, None) is not None

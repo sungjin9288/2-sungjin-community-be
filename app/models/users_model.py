@@ -12,7 +12,6 @@ _user_seq: int = 1
 
 
 def seed() -> None:
-
     if is_email_exists("start@community.com"):
         return
     create_user(email="start@community.com", password="start21", nickname="starter")
@@ -67,3 +66,4 @@ def get_user_id_by_token(token: str) -> Optional[int]:
 
 def delete_session(token: str) -> None:
     _sessions.pop(token, None)
+
