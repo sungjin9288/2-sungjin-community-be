@@ -39,7 +39,6 @@ def signup(payload: dict) -> JSONResponse:
 
 
 def login(payload: dict) -> JSONResponse:
-    
     try:
         email = payload.get("email")
         password = payload.get("password")

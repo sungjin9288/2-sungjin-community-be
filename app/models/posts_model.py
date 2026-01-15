@@ -5,6 +5,9 @@ from typing import Dict, List, Optional
 _posts: Dict[int, dict] = {}
 _post_seq: int = 1
 
+_posts: Dict[int, dict] = {}
+_post_seq: int = 1
+
 
 def create_post(author_id: int, title: str, content: str, image: Optional[str] = None) -> dict:
     global _post_seq

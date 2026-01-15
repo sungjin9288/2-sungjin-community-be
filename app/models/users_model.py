@@ -12,7 +12,6 @@ _user_seq: int = 1
 
 
 def seed() -> None:
-    
     if is_email_exists("start@community.com"):
         return
     create_user(email="start@community.com", password="start21", nickname="starter")
