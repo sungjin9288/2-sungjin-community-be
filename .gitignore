@@ -1,8 +1,35 @@
 # Python
 __pycache__/
-*.pyc
-.venv/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+dist/
+*.egg-info/
 
 # IDE
-.idea/
 .vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 환경 변수
+.env
+.env.local
+
+# 로그
+*.log
+
+# 테스트
+.pytest_cache/
+.coverage
+htmlcov/
