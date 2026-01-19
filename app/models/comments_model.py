@@ -1,31 +1,18 @@
-from __future__ import annotations
-
-from typing import Dict, List, Optional
-
-_comments: Dict[int, dict] = {}
+_comments: dict[int, dict] = {}
 _comment_seq: int = 1
 
-
-def create_comment(post_id: int, author_id: int, content: str) -> dict:
-    global _comment_seq
-    comment = {
-        "id": _comment_seq,
-        "post_id": post_id,
-        "author_id": author_id,
-        "content": content,
-    }
-    _comments[_comment_seq] = comment
-    _comment_seq += 1
-    return comment
-
-
-def list_comments(post_id: int) -> List[dict]:
+def list_comments(post_id: int) -> list[dict]:
     return [c for c in _comments.values() if c["post_id"] == post_id]
 
-
-def delete_comment(comment_id: int) -> bool:
-    return _comments.pop(comment_id, None) is not None
-
-
-def find_comment_by_id(comment_id: int) -> Optional[dict]:
+def find_comment(comment_id: int) -> dict | None:
     return _comments.get(comment_id)
+
+def create_comment(user_id: int, post_id: int, content: str) -> dict:
+    global _comment_seq
+    c = {"id": _comment_seq, "user_id": user_id, "post_id": post_id, "content": content}
+    _comments[_comment_seq] = c
+    _comment_seq += 1
+    return c
+
+def delete_comment(comment_id: int):
+    _comments.pop(comment_id, None)

@@ -1,115 +1,66 @@
 from fastapi.responses import JSONResponse
+from app.common.responses import ok, created
+from app.common.exceptions import BusinessException, ErrorCodes
+from app.models import posts_model
 
-from app.common.responses import ok, created, bad_request, unauthorized, not_found, server_error
-from app.common.errors import (
-    UNAUTHORIZED,
-    INVALID_TOKEN,
-    PAGE_INVALID,
-    LIMIT_INVALID,
-    TITLE_REQUIRED,
-    CONTENT_REQUIRED,
-    POST_NOT_FOUND,
-    INTERNAL_SERVER_ERROR,
-)
-from app.common.auth import parse_bearer_token
-from app.models import users_model, posts_model
+def list_posts(page: int = 1, limit: int = 10) -> JSONResponse:
+    data = posts_model.list_posts(page, limit)
+    return ok("게시글 목록 조회 성공", data)
 
+def create_post(user_id: int, payload: dict) -> JSONResponse:
+    title = (payload.get("title") or "").strip()
+    content = (payload.get("content") or "").strip()
+    image_url = payload.get("image_url")
+    
+    if not title or not content:
+        raise BusinessException(*ErrorCodes.MISSING_REQUIRED_FIELDS)
 
-def _require_user_id(authorization: str | None) -> int | None:
-    token = parse_bearer_token(authorization)
-    if not token:
-        return None
-    user_id = users_model.get_user_id_by_token(token)
-    return user_id
+    post = posts_model.create_post(user_id, title, content, image_url)
+    return created("게시글이 작성되었습니다.", post)
 
+def get_post(post_id: int) -> JSONResponse:
+    post = posts_model.find_post(post_id)
+    if not post:
+        raise BusinessException(*ErrorCodes.POST_NOT_FOUND)
+    
+    post["views"] += 1
+    data = post.copy()
+    data["likes_count"] = posts_model.get_like_count(post_id)
+    
+    return ok("게시글 상세 조회 성공", data)
 
-def list_posts(authorization: str | None, page: int, limit: int) -> JSONResponse:
-    try:
-        user_id = _require_user_id(authorization)
-        if user_id is None:
-            return unauthorized(UNAUTHORIZED.message)
+def update_post(user_id: int, post_id: int, payload: dict) -> JSONResponse:
+    post = posts_model.find_post(post_id)
+    if not post:
+        raise BusinessException(*ErrorCodes.POST_NOT_FOUND)
+    if post["user_id"] != user_id:
+        raise BusinessException(*ErrorCodes.FORBIDDEN)
+        
+    title = (payload.get("title") or "").strip()
+    content = (payload.get("content") or "").strip()
+    image_url = payload.get("image_url")
+    
+    updated = posts_model.update_post(post_id, title, content, image_url)
+    return ok("게시글이 수정되었습니다.", updated)
 
-        if page < 1:
-            return bad_request(PAGE_INVALID.message)
-        if limit < 1 or limit > 50:
-            return bad_request(LIMIT_INVALID.message)
+def delete_post(user_id: int, post_id: int) -> JSONResponse:
+    post = posts_model.find_post(post_id)
+    if not post:
+        raise BusinessException(*ErrorCodes.POST_NOT_FOUND)
+    if post["user_id"] != user_id:
+        raise BusinessException(*ErrorCodes.FORBIDDEN)
+        
+    posts_model.delete_post(post_id)
+    return ok("게시글이 삭제되었습니다.")
 
-        data = posts_model.list_posts(page=page, limit=limit)
-        return ok("read_posts_success", data)
+def like_post(user_id: int, post_id: int) -> JSONResponse:
+    if not posts_model.find_post(post_id):
+        raise BusinessException(*ErrorCodes.POST_NOT_FOUND)
+    posts_model.add_like(user_id, post_id)
+    return ok("좋아요를 눌렀습니다.")
 
-    except Exception:
-        return server_error(INTERNAL_SERVER_ERROR.message)
-
-
-def create_post(authorization: str | None, payload: dict) -> JSONResponse:
-    try:
-        user_id = _require_user_id(authorization)
-        if user_id is None:
-            return unauthorized(UNAUTHORIZED.message)
-
-        title = payload.get("title")
-        content = payload.get("content")
-        image = payload.get("image")
-
-        if not title:
-            return bad_request(TITLE_REQUIRED.message)
-        if not content:
-            return bad_request(CONTENT_REQUIRED.message)
-
-        post = posts_model.create_post(author_id=user_id, title=title, content=content, image=image)
-        return created("post_created", {"post_id": post["id"]})
-
-    except Exception:
-        return server_error(INTERNAL_SERVER_ERROR.message)
-
-
-def get_post_detail(authorization: str | None, post_id: int) -> JSONResponse:
-    try:
-        user_id = _require_user_id(authorization)
-        if user_id is None:
-            return unauthorized(UNAUTHORIZED.message)
-
-        post = posts_model.find_post_by_id(post_id)
-        if post is None:
-            return not_found(POST_NOT_FOUND.message)
-
-        return ok("read_detail_success", post)
-
-    except Exception:
-        return server_error(INTERNAL_SERVER_ERROR.message)
-
-
-def update_post(authorization: str | None, post_id: int, payload: dict) -> JSONResponse:
-    try:
-        user_id = _require_user_id(authorization)
-        if user_id is None:
-            return unauthorized(UNAUTHORIZED.message)
-
-        title = payload.get("title")
-        content = payload.get("content")
-        image = payload.get("image")
-
-        updated = posts_model.update_post(post_id=post_id, title=title, content=content, image=image)
-        if updated is None:
-            return not_found(POST_NOT_FOUND.message)
-
-        return ok("post_updated", {"post_id": post_id})
-
-    except Exception:
-        return server_error(INTERNAL_SERVER_ERROR.message)
-
-
-def delete_post(authorization: str | None, post_id: int) -> JSONResponse:
-    try:
-        user_id = _require_user_id(authorization)
-        if user_id is None:
-            return unauthorized(UNAUTHORIZED.message)
-
-        ok_deleted = posts_model.delete_post(post_id)
-        if not ok_deleted:
-            return not_found(POST_NOT_FOUND.message)
-
-        return ok("post_deleted", {"post_id": post_id})
-
-    except Exception:
-        return server_error(INTERNAL_SERVER_ERROR.message)
+def unlike_post(user_id: int, post_id: int) -> JSONResponse:
+    if not posts_model.find_post(post_id):
+        raise BusinessException(*ErrorCodes.POST_NOT_FOUND)
+    posts_model.remove_like(user_id, post_id)
+    return ok("좋아요를 취소했습니다.")

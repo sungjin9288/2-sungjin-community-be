@@ -1,21 +1,36 @@
 from fastapi import FastAPI, Request
-from fastapi.exceptions import RequestValidationError
-
+from fastapi.responses import JSONResponse
 from app.routes import router as api_router
-from app.common.responses import bad_request, server_error
-from app.common.errors import INVALID_REQUEST, INTERNAL_SERVER_ERROR
+from app.common.exceptions import BusinessException, ErrorCodes
 
-app = FastAPI(title="Community API")
+app = FastAPI()
 
+# 1. 비즈니스 로직 예외 처리
+@app.exception_handler(BusinessException)
+async def business_exception_handler(request: Request, exc: BusinessException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "success": False,
+            "message": exc.message,
+            "error": {"code": exc.code, "message": exc.message},
+            "data": None
+        }
+    )
 
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    return bad_request(INVALID_REQUEST.message)
-
-
+# 2. 예상치 못한 서버 에러 처리 (500)
 @app.exception_handler(Exception)
-async def unhandled_exception_handler(request: Request, exc: Exception):
-    return server_error(INTERNAL_SERVER_ERROR.message)
-
+async def global_exception_handler(request: Request, exc: Exception):
+    print(f"!!! Unhandled Server Error: {exc}") # 로그 남기기
+    code, msg, status = ErrorCodes.INTERNAL_SERVER_ERROR
+    return JSONResponse(
+        status_code=status,
+        content={
+            "success": False,
+            "message": msg,
+            "error": {"code": code, "message": msg},
+            "data": None
+        }
+    )
 
 app.include_router(api_router)

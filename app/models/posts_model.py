@@ -1,62 +1,53 @@
-from __future__ import annotations
-
-from typing import Dict, List, Optional
-
-_posts: Dict[int, dict] = {}
+_posts: dict[int, dict] = {}
 _post_seq: int = 1
+_likes: set[tuple[int, int]] = set()  # (user_id, post_id)
 
-_posts: Dict[int, dict] = {}
-_post_seq: int = 1
+def list_posts(page: int = 1, limit: int = 10) -> dict:
+    items = list(_posts.values())
+    for item in items:
+        item["likes_count"] = get_like_count(item["id"])
+        
+    items.sort(key=lambda x: x['id'], reverse=True)
+    total = len(items)
+    start = (page - 1) * limit
+    end = start + limit
+    return {"page": page, "limit": limit, "total": total, "items": items[start:end]}
 
+def find_post(post_id: int) -> dict | None:
+    return _posts.get(post_id)
 
-def create_post(author_id: int, title: str, content: str, image: Optional[str] = None) -> dict:
+def create_post(user_id: int, title: str, content: str, image_url: str = None) -> dict:
     global _post_seq
     post = {
         "id": _post_seq,
-        "author_id": author_id,
+        "user_id": user_id,
         "title": title,
         "content": content,
-        "image": image,
+        "image_url": image_url,
+        "views": 0
     }
     _posts[_post_seq] = post
     _post_seq += 1
     return post
 
-
-def list_posts(page: int, limit: int) -> dict:
-    all_posts = sorted(_posts.values(), key=lambda p: p["id"], reverse=True)
-    total = len(all_posts)
-
-    start = (page - 1) * limit
-    end = start + limit
-    items = all_posts[start:end]
-
-    return {
-        "page": page,
-        "limit": limit,
-        "total": total,
-        "items": items,
-    }
-
-
-def find_post_by_id(post_id: int) -> Optional[dict]:
-    return _posts.get(post_id)
-
-
-def update_post(post_id: int, title: Optional[str], content: Optional[str], image: Optional[str]) -> Optional[dict]:
+def update_post(post_id: int, title: str, content: str, image_url: str = None) -> dict:
     post = _posts.get(post_id)
-    if not post:
-        return None
-
-    if title is not None:
+    if post:
         post["title"] = title
-    if content is not None:
         post["content"] = content
-    if image is not None:
-        post["image"] = image
-
+        if image_url is not None:
+            post["image_url"] = image_url
     return post
 
+def delete_post(post_id: int):
+    _posts.pop(post_id, None)
 
-def delete_post(post_id: int) -> bool:
-    return _posts.pop(post_id, None) is not None
+# --- 좋아요 로직 ---
+def add_like(user_id: int, post_id: int):
+    _likes.add((user_id, post_id))
+
+def remove_like(user_id: int, post_id: int):
+    _likes.discard((user_id, post_id))
+
+def get_like_count(post_id: int) -> int:
+    return sum(1 for uid, pid in _likes if pid == post_id)
