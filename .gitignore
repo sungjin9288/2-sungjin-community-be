@@ -33,3 +33,7 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+
+# 업로드된 파일 (🆕 추가)
+static/uploads/*
+!static/uploads/.gitkeep
