@@ -1,155 +1,452 @@
-# 커뮤니티 백엔드 API
+# 🎭 아무 말 대잔치 - 커뮤니티 백엔드
 
-FastAPI 기반 커뮤니티 백엔드 프로젝트
+> FastAPI 기반 RESTful API 커뮤니티 백엔드 서버
 
-## 📋 프로젝트 개요
+[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?style=flat&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![bcrypt](https://img.shields.io/badge/Security-bcrypt-red?style=flat)](https://github.com/pyca/bcrypt)
 
-- **목적**: Route - Controller - Model 패턴 학습
-- **특징**: DB 없이 In-Memory 저장소 사용
-- **인증**: 세션 쿠키 방식
+## 📋 목차
 
-## 🏗️ 아키텍처
+- [프로젝트 소개](#-프로젝트-소개)
+- [주요 기능](#-주요-기능)
+- [기술 스택](#-기술-스택)
+- [프로젝트 구조](#-프로젝트-구조)
+- [설치 및 실행](#-설치-및-실행)
+- [API 문서](#-api-문서)
+- [보안](#-보안)
+- [실무 적용 사항](#-실무-적용-사항)
+- [라이선스](#-라이선스)
+
+---
+
+## 🎯 프로젝트 소개
+
+**아무 말 대잔치**는 사용자들이 자유롭게 소통할 수 있는 커뮤니티 플랫폼입니다.
+
+
+### 프로젝트 목표
+- RESTful API 설계 원칙 준수
+- 계층 분리 아키텍처 구현 (Route-Controller-Model)
+- 실무 수준의 보안 및 에러 처리
+- 체계적인 문서화
+
+---
+
+## ✨ 주요 기능
+
+### 🔐 인증 & 회원 관리
+- 회원가입 / 로그인 / 로그아웃
+- bcrypt 비밀번호 암호화
+- 쿠키 기반 세션 인증
+- 프로필 이미지 업로드
+- 회원정보 수정 / 비밀번호 변경
+
+### 📝 게시글 관리
+- 게시글 CRUD (생성, 조회, 수정, 삭제)
+- 페이지네이션 (page, limit)
+- 조회수 자동 증가
+- 작성자 검증
+
+### 💬 댓글 시스템
+- 댓글 작성 / 조회 / 수정 / 삭제
+- 게시글별 댓글 목록
+- 작성자 검증
+
+### ❤️ 좋아요 기능
+- 좋아요 / 좋아요 취소
+- 중복 좋아요 방지
+- 좋아요 수 집계
+
+### 🖼️ 이미지 업로드
+- 프로필 이미지 업로드
+- 게시글 이미지 업로드
+- 파일 확장자 검증
+- UUID 기반 파일명 생성
+
+### 📄 정적 페이지
+- 이용약관 HTML 서빙
+- 개인정보처리방침 HTML 서빙
+
+---
+
+## 🛠️ 기술 스택
+
+### Backend
+- **Python** 3.11+
+- **FastAPI** 0.115+
+- **Uvicorn** (ASGI 서버)
+
+### Security
+- **bcrypt** (비밀번호 해싱)
+- **HttpOnly Cookies** (XSS 방어)
+- **SameSite Cookies** (CSRF 방어)
+
+### Storage
+- **In-Memory** (개발 환경 - JSON 데이터)
+- **File System** (이미지 저장)
+
+### Development
+- **Pydantic** (데이터 검증)
+- **Python Logging** (구조화된 로그)
+
+---
+
+## 📁 프로젝트 구조
 
 ```
-app/
-├── common/         # 공통 모듈 (인증, 예외, 응답 등)
-├── models/         # 데이터 계층 (In-Memory 저장소)
-├── controllers/    # 비즈니스 로직
-├── routes/         # API 엔드포인트
-└── main.py         # 앱 진입점
+2-sungjin-community-be/
+├── app/
+│   ├── common/                 # 공통 모듈
+│   │   ├── __init__.py
+│   │   ├── auth.py            # 인증 헬퍼
+│   │   ├── deps.py            # 의존성 주입
+│   │   ├── exceptions.py      # 커스텀 예외
+│   │   ├── responses.py       # 응답 포맷
+│   │   └── security.py        # 비밀번호 해싱
+│   │
+│   ├── controllers/            # 비즈니스 로직
+│   │   ├── __init__.py
+│   │   ├── auth_controller.py
+│   │   ├── users_controller.py
+│   │   ├── posts_controller.py
+│   │   └── comments_controller.py
+│   │
+│   ├── models/                 # 데이터 모델
+│   │   ├── __init__.py
+│   │   ├── users_model.py
+│   │   ├── posts_model.py
+│   │   └── comments_model.py
+│   │
+│   ├── routes/                 # API 라우터
+│   │   ├── __init__.py
+│   │   ├── auth.py
+│   │   ├── users.py
+│   │   ├── posts.py
+│   │   ├── comments.py
+│   │   └── images.py
+│   │
+│   └── main.py                 # 애플리케이션 진입점
+│
+├── static/                     # 정적 파일
+│   ├── uploads/               # 업로드된 이미지
+│   └── terms/                 # 이용약관 HTML
+│       ├── service.html
+│       └── privacy.html
+│
+├── requirements.txt            # Python 의존성
+├── .gitignore
+├── README.md
+├── RUN.md                      # 실행 가이드
+└── CHANGELOG.md                # 변경 이력
 ```
 
-## 🚀 시작하기
+---
 
-### 1. 의존성 설치
+## 🚀 설치 및 실행
+
+### 1. 저장소 클론
+
+```bash
+git clone https://github.com/80-hours-a-week/2-sungjin-community-be.git
+cd 2-sungjin-community-be
+```
+
+### 2. 가상환경 생성 및 활성화
+
+```bash
+# Windows
+python -m venv .venv
+.venv\Scripts\activate
+
+# macOS/Linux
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+### 3. 의존성 설치
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. 서버 실행
-
-```bash
-# 개발 모드 (hot reload)
-uvicorn app.main:app --reload
-
-# 또는
-python -m app.main
+**requirements.txt:**
+```
+fastapi
+uvicorn[standard]
+pydantic
+python-multipart
+bcrypt
 ```
 
-서버: http://localhost:8000  
-API 문서: http://localhost:8000/docs
+### 4. 서버 실행
 
-## 📡 API 엔드포인트
+```bash
+# 개발 모드 (자동 재시작)
+uvicorn app.main:app --reload
 
-### 인증 (Auth)
+# 프로덕션 모드
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
 
-| Method | Endpoint | 설명 |
-|--------|----------|------|
-| POST | /auth/login | 로그인 |
-| POST | /auth/logout | 로그아웃 |
+### 5. 서버 확인
 
-### 사용자 (Users)
+```
+✅ 서버: http://localhost:8000
+📖 API 문서: http://localhost:8000/docs
+📊 Alternative 문서: http://localhost:8000/redoc
+```
 
-| Method | Endpoint | 설명 | 인증 |
-|--------|----------|------|------|
-| POST | /users/signup | 회원가입 | ❌ |
-| GET | /users/me | 내 정보 조회 | ✅ |
-| PUT | /users/me | 회원정보 수정 | ✅ |
-| PUT | /users/me/password | 비밀번호 변경 | ✅ |
-| DELETE | /users/me | 회원 탈퇴 | ✅ |
+---
 
-### 게시글 (Posts)
+## 📖 API 문서
 
-| Method | Endpoint | 설명 | 인증 |
-|--------|----------|------|------|
-| GET | /posts | 목록 조회 | ❌ |
-| POST | /posts | 작성 | ✅ |
-| GET | /posts/{id} | 상세 조회 | ❌ |
-| PUT | /posts/{id} | 수정 | ✅ |
-| DELETE | /posts/{id} | 삭제 | ✅ |
-| POST | /posts/{id}/likes | 좋아요 | ✅ |
-| DELETE | /posts/{id}/likes | 좋아요 취소 | ✅ |
+### Swagger UI
+```
+http://localhost:8000/docs
+```
+- 모든 API 엔드포인트 확인
+- 실시간 테스트 가능
+- 요청/응답 스키마 확인
 
-### 댓글 (Comments)
+### API 엔드포인트
 
-| Method | Endpoint | 설명 | 인증 |
-|--------|----------|------|------|
-| GET | /posts/{id}/comments | 목록 조회 | ❌ |
-| POST | /posts/{id}/comments | 작성 | ✅ |
-| DELETE | /posts/{id}/comments/{cid} | 삭제 | ✅ |
+#### 🔐 인증 (Auth)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/auth/login` | 로그인 |
+| POST | `/auth/logout` | 로그아웃 |
 
-## 🔐 보안
+#### 👤 회원 (Users)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/users/signup` | 회원가입 |
+| GET | `/users/me` | 내 정보 조회 |
+| PUT | `/users/me` | 회원정보 수정 |
+| PUT | `/users/me/password` | 비밀번호 변경 |
+| DELETE | `/users/me` | 회원 탈퇴 |
 
-- **비밀번호 해싱**: PBKDF2-SHA256 (200,000 iterations)
-- **세션 관리**: 쿠키 기반 (HttpOnly, SameSite=Lax)
-- **입력 검증**: Pydantic 모델 + 커스텀 검증
+#### 📝 게시글 (Posts)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/posts` | 게시글 목록 (페이지네이션) |
+| POST | `/posts` | 게시글 작성 |
+| GET | `/posts/{post_id}` | 게시글 상세 조회 |
+| PUT | `/posts/{post_id}` | 게시글 수정 |
+| DELETE | `/posts/{post_id}` | 게시글 삭제 |
+| POST | `/posts/{post_id}/likes` | 좋아요 |
+| DELETE | `/posts/{post_id}/likes` | 좋아요 취소 |
 
-## 📝 응답 형식
+#### 💬 댓글 (Comments)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/posts/{post_id}/comments` | 댓글 목록 |
+| POST | `/posts/{post_id}/comments` | 댓글 작성 |
+| PUT | `/comments/{comment_id}` | 댓글 수정 |
+| DELETE | `/comments/{comment_id}` | 댓글 삭제 |
 
-### 성공
+#### 🖼️ 이미지 (Images)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/images/profile` | 프로필 이미지 업로드 |
+| POST | `/images/post` | 게시글 이미지 업로드 |
 
+### API 응답 형식
+
+**성공 응답:**
 ```json
 {
-  "message": "success",
-  "data": { ... }
+  "message": "signup_success",
+  "data": {
+    "id": 1,
+    "email": "user@example.com",
+    "nickname": "사용자"
+  }
 }
 ```
 
-### 에러
-
+**에러 응답:**
 ```json
 {
-  "message": "error_code",
+  "message": "email_already_exists",
   "data": null
 }
 ```
 
-## ✅ 구현된 기능
+### 상태 코드
+- `200 OK` - 성공
+- `201 Created` - 생성 성공
+- `400 Bad Request` - 잘못된 요청
+- `401 Unauthorized` - 인증 실패
+- `403 Forbidden` - 권한 없음
+- `404 Not Found` - 리소스 없음
+- `409 Conflict` - 중복 (이메일, 좋아요 등)
+- `500 Internal Server Error` - 서버 에러
 
-- [x] 회원가입 / 로그인 / 로그아웃
-- [x] 게시글 CRUD
-- [x] 댓글 CRUD
-- [x] 좋아요 기능
-- [x] 페이지네이션
-- [x] 권한 체크
-- [x] 입력 검증
-- [x] 예외 처리
-- [x] 로깅
+---
 
-## 🎯 실무 학습 포인트
+## 🔒 보안
 
-### 아키텍처 패턴
-- **계층 분리**: Route → Controller → Model
-- **의존성 주입**: 재사용 가능한 인증 체커
-- **예외 처리**: 커스텀 예외 + 전역 핸들러
+### 비밀번호 보안
+- **bcrypt** 해싱 알고리즘 사용
+- **rounds=12** (업계 표준)
+- 72바이트 제한 처리
+
+```python
+import bcrypt
+
+# 해싱
+salt = bcrypt.gensalt(rounds=12)
+hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
+
+# 검증
+is_valid = bcrypt.checkpw(password.encode('utf-8'), hashed)
+```
+
+### 세션 보안
+- **HttpOnly** 쿠키 (JavaScript 접근 불가)
+- **SameSite=lax** (CSRF 공격 방어)
+- **UUID v4** 기반 세션 ID
+- 7일 만료 시간
+
+```python
+response.set_cookie(
+    key="session_id",
+    value=session_id,
+    httponly=True,
+    samesite="lax",
+    secure=False,  # 프로덕션에서는 True
+    path="/",
+    max_age=86400 * 7
+)
+```
+
+### 파일 업로드 보안
+- 파일 확장자 검증
+- UUID 기반 고유 파일명
+- 허용 확장자: `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`
+
+```python
+ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+unique_filename = f"{uuid.uuid4()}{file_ext}"
+```
+
+### 입력 검증
+- 이메일 형식 검증
+- 비밀번호 정책 (8자 이상)
+- 닉네임 길이 제한 (2-20자)
+- 페이지네이션 범위 검증
+
+---
+
+## 💼 실무 적용 사항
+
+### 1. 아키텍처 패턴
+- **Route-Controller-Model** 3계층 분리
+- **의존성 주입** (Dependency Injection)
+- **관심사 분리** (Separation of Concerns)
+
+### 2. 코드 품질
+- **Type Hints** 사용
+- **Docstrings** 작성
+- **에러 처리** (try-except)
+- **DRY 원칙** 준수
+
+### 3. 로깅 시스템
+```python
+import logging
+
+logger = logging.getLogger(__name__)
+
+# 구조화된 로그
+logger.info(
+    f"Request: {method} {path}",
+    extra={"user_id": user_id, "status": 200}
+)
+```
+
+### 4. 예외 처리
+```python
+class BusinessException(Exception):
+    def __init__(self, code: str, message: str, status_code: int):
+        self.code = code
+        self.message = message
+        self.status_code = status_code
+
+# 사용
+raise BusinessException(*ErrorCodes.EMAIL_ALREADY_EXISTS)
+```
+
+### 5. API 명세 준수
+- 일관된 응답 형식
+- 명확한 에러 메시지
+- RESTful 네이밍 규칙
+
+### 6. Git 커밋 규칙
+```
+feat: 새로운 기능 추가
+fix: 버그 수정
+refactor: 코드 리팩토링
+docs: 문서 수정
+test: 테스트 추가
+chore: 기타 작업
+```
+
+---
+
+## 📚 학습 포인트
+
+### 백엔드 개발
+- ✅ RESTful API 설계
+- ✅ 비동기 프로그래밍 (async/await)
+- ✅ 인증/인가 구현
+- ✅ 파일 업로드 처리
+- ✅ 데이터 검증 (Pydantic)
 
 ### 보안
-- 비밀번호 해싱 (평문 저장 금지)
-- 세션 관리 (쿠키 보안 설정)
-- 권한 체크 (작성자 검증)
+- ✅ 비밀번호 해싱 (bcrypt)
+- ✅ 세션 관리
+- ✅ XSS/CSRF 방어
+- ✅ 입력 검증
 
-### 코드 품질
-- 타입 힌팅
-- Docstring
-- 검증 로직 분리
-- 원본 데이터 보호 (copy 사용)
+### 아키텍처
+- ✅ 계층 분리
+- ✅ 의존성 주입
+- ✅ 에러 핸들링
+- ✅ 로깅 시스템
 
-## 🚧 개선 가능 사항
+---
 
-- [ ] JWT 인증 전환
-- [ ] 세션 만료 처리
-- [ ] 데이터베이스 연동
-- [ ] 단위 테스트 추가
-- [ ] API 레이트 리미팅
+## 🧪 테스트
 
-## 📚 학습 자료
+### Swagger UI 테스트
+```
+1. http://localhost:8000/docs 접속
+2. 회원가입 → 로그인 → API 테스트
+3. 쿠키 자동 관리됨
+```
 
-- FastAPI 공식 문서: https://fastapi.tiangolo.com
-- Pydantic: https://docs.pydantic.dev
-- REST API 설계: https://restfulapi.net
+### cURL 테스트
+```bash
+# 회원가입
+curl -X POST http://localhost:8000/users/signup \
+  -H "Content-Type: application/json" \
+  -d '{"email":"test@example.com","password":"test1234","nickname":"테스터"}'
 
-## 👨‍💻 개발자
+# 로그인 (쿠키 저장)
+curl -c cookies.txt -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"test@example.com","password":"test1234"}'
 
-- 성진
-- GitHub Organization: 80-hours-a-week
+# 내 정보 조회 (쿠키 사용)
+curl -b cookies.txt http://localhost:8000/users/me
+```
+
+
+---
+
+## 🙏 감사의 말
+
+ 감사드립니다.
+
+---
