@@ -1,58 +1,163 @@
+from enum import Enum
+from typing import Tuple
 
 
-
-class BusinessException(Exception):
- 
-    def __init__(self, code: str, message: str, status_code: int = 400, data: dict = None):
-        self.code = code
-        self.message = message
-        self.status_code = status_code
-        self.data = data
-        super().__init__(message)
-
-
-class ErrorCodes:
+class ErrorCode(Enum):
 
     
     # 400 Bad Request
-    MISSING_REQUIRED_FIELDS = ("missing_required_fields", "필수 입력값이 누락되었습니다.", 400)
-    INVALID_REQUEST_BODY = ("invalid_request_body", "요청 형식이 올바르지 않습니다.", 400)
-    INVALID_PAGING_PARAMS = ("invalid_paging_params", "페이징 파라미터가 올바르지 않습니다.", 400)
-    INVALID_EMAIL_FORMAT = ("invalid_email_format", "이메일 형식이 올바르지 않습니다.", 400)
-    INVALID_POST_ID = ("invalid_post_id", "게시글 ID가 올바르지 않습니다.", 400)
-    INVALID_COMMENT_ID = ("invalid_comment_id", "댓글 ID가 올바르지 않습니다.", 400)
-
+    MISSING_REQUIRED_FIELDS = ("missing_required_fields", "필수 값이 없습니다", 400)
+    INVALID_REQUEST_FORMAT = ("invalid_request_format", "요청 형식이 올바르지 않습니다", 400)
+    INVALID_PAGING_PARAMS = ("invalid_paging_params", "페이징 파라미터가 올바르지 않습니다", 400)
+    INVALID_EMAIL_FORMAT = ("invalid_email_format", "이메일 형식이 올바르지 않습니다", 400)
+    INVALID_POST_ID = ("invalid_post_id", "게시글 ID가 올바르지 않습니다", 400)
+    INVALID_COMMENT_ID = ("invalid_comment_id", "댓글 ID가 올바르지 않습니다", 400)
+    
     # 401 Unauthorized
-    UNAUTHORIZED = ("unauthorized", "인증이 필요합니다.", 401)
-    INVALID_CREDENTIALS = ("invalid_credentials", "이메일 또는 비밀번호가 올바르지 않습니다.", 401)
-    EMAIL_NOT_FOUND = ("email_not_found", "등록되지 않은 이메일입니다.", 401)
-    WRONG_PASSWORD = ("wrong_password", "비밀번호가 일치하지 않습니다.", 401)
-    INVALID_TOKEN = ("invalid_token", "유효하지 않은 토큰입니다.", 401)
-    EXPIRED_TOKEN = ("expired_token", "만료된 토큰입니다.", 401)
-
+    UNAUTHORIZED = ("unauthorized", "인증이 필요합니다", 401)
+    INVALID_CREDENTIALS = ("invalid_credentials", "아이디 또는 비밀번호가 올바르지 않습니다", 401)
+    
     # 403 Forbidden
-    PERMISSION_DENIED = ("permission_denied", "권한이 없습니다.", 403)
-
+    FORBIDDEN = ("forbidden", "권한이 없습니다", 403)
+    
     # 404 Not Found
-    USER_NOT_FOUND = ("user_not_found", "사용자를 찾을 수 없습니다.", 404)
-    POST_NOT_FOUND = ("post_not_found", "게시글을 찾을 수 없습니다.", 404)
-    COMMENT_NOT_FOUND = ("comment_not_found", "댓글을 찾을 수 없습니다.", 404)
-    LIKE_NOT_FOUND = ("like_not_found", "좋아요를 찾을 수 없습니다.", 404)
-
+    EMAIL_NOT_FOUND = ("email_not_found", "이메일을 찾을 수 없습니다", 404)
+    USER_NOT_FOUND = ("user_not_found", "사용자를 찾을 수 없습니다", 404)
+    POST_NOT_FOUND = ("post_not_found", "게시글을 찾을 수 없습니다", 404)
+    COMMENT_NOT_FOUND = ("comment_not_found", "댓글을 찾을 수 없습니다", 404)
+    
     # 409 Conflict
-    EMAIL_ALREADY_EXISTS = ("email_already_exists", "이미 사용 중인 이메일입니다.", 409)
-    NICKNAME_ALREADY_EXISTS = ("nickname_already_exists", "이미 사용 중인 닉네임입니다.", 409)
-    LIKE_ALREADY_EXISTS = ("like_already_exists", "이미 좋아요를 눌렀습니다.", 409)
-
+    EMAIL_ALREADY_EXISTS = ("email_already_exists", "이미 존재하는 이메일입니다", 409)
+    NICKNAME_ALREADY_EXISTS = ("nickname_already_exists", "이미 존재하는 닉네임입니다", 409)
+    
     # 422 Unprocessable Entity
-    INVALID_PASSWORD_POLICY = ("invalid_password_policy", "비밀번호 정책을 만족하지 않습니다.", 422)
-    INVALID_NICKNAME_POLICY = ("invalid_nickname_policy", "닉네임 정책을 만족하지 않습니다.", 422)
-    INVALID_TITLE_POLICY = ("invalid_title_policy", "제목 길이가 제한을 초과했습니다.", 422)
-    INVALID_CONTENT_POLICY = ("invalid_content_policy", "내용 길이가 제한을 초과했습니다.", 422)
-    INVALID_COMMENT_POLICY = ("invalid_comment_policy", "댓글 길이가 제한을 초과했습니다.", 422)
-
-    # 429 Too Many Requests
-    TOO_MANY_REQUESTS = ("too_many_requests", "너무 많은 요청이 발생했습니다.", 429)
-
+    INVALID_PASSWORD = ("invalid_password", "비밀번호는 8-20자, 대소문자, 숫자, 특수문자를 각각 1개 이상 포함해야 합니다", 422)
+    PASSWORD_TOO_SHORT = ("password_too_short", "비밀번호는 최소 8자 이상이어야 합니다", 422)
+    PASSWORD_TOO_LONG = ("password_too_long", "비밀번호는 최대 20자 이하여야 합니다", 422)
+    
     # 500 Internal Server Error
-    INTERNAL_SERVER_ERROR = ("internal_server_error", "서버 내부 오류가 발생했습니다.", 500)
+    INTERNAL_SERVER_ERROR = ("internal_server_error", "서버 오류가 발생했습니다", 500)
+    DATABASE_ERROR = ("database_error", "데이터베이스 오류가 발생했습니다", 500)
+    
+    @property
+    def code(self) -> str:
+
+        return self.value[0]
+    
+    @property
+    def message(self) -> str:
+
+        return self.value[1]
+    
+    @property
+    def status_code(self) -> int:
+
+        return self.value[2]
+
+
+# ==================== 커스텀 예외 클래스 ====================
+
+class BaseAPIException(Exception):
+
+    
+    def __init__(self, error_code: ErrorCode, custom_message: str = None):
+        self.error_code = error_code.code
+        self.message = custom_message or error_code.message
+        self.status_code = error_code.status_code
+        super().__init__(self.message)
+
+
+class MissingRequiredFieldsError(BaseAPIException):
+
+    def __init__(self, custom_message: str = None):
+        super().__init__(ErrorCode.MISSING_REQUIRED_FIELDS, custom_message)
+
+
+class InvalidRequestFormatError(BaseAPIException):
+
+    def __init__(self, custom_message: str = None):
+        super().__init__(ErrorCode.INVALID_REQUEST_FORMAT, custom_message)
+
+
+class InvalidPagingParamsError(BaseAPIException):
+
+    def __init__(self, custom_message: str = None):
+        super().__init__(ErrorCode.INVALID_PAGING_PARAMS, custom_message)
+
+
+class InvalidEmailFormatError(BaseAPIException):
+
+    def __init__(self, custom_message: str = None):
+        super().__init__(ErrorCode.INVALID_EMAIL_FORMAT, custom_message)
+
+
+class UnauthorizedError(BaseAPIException):
+
+    def __init__(self, custom_message: str = None):
+        super().__init__(ErrorCode.UNAUTHORIZED, custom_message)
+
+
+class InvalidCredentialsError(BaseAPIException):
+
+    def __init__(self, custom_message: str = None):
+        super().__init__(ErrorCode.INVALID_CREDENTIALS, custom_message)
+
+
+class ForbiddenError(BaseAPIException):
+
+    def __init__(self, custom_message: str = None):
+        super().__init__(ErrorCode.FORBIDDEN, custom_message)
+
+
+class EmailNotFoundError(BaseAPIException):
+
+    def __init__(self, custom_message: str = None):
+        super().__init__(ErrorCode.EMAIL_NOT_FOUND, custom_message)
+
+
+class UserNotFoundError(BaseAPIException):
+
+    def __init__(self, custom_message: str = None):
+        super().__init__(ErrorCode.USER_NOT_FOUND, custom_message)
+
+
+class PostNotFoundError(BaseAPIException):
+
+    def __init__(self, custom_message: str = None):
+        super().__init__(ErrorCode.POST_NOT_FOUND, custom_message)
+
+
+class CommentNotFoundError(BaseAPIException):
+
+    def __init__(self, custom_message: str = None):
+        super().__init__(ErrorCode.COMMENT_NOT_FOUND, custom_message)
+
+
+class EmailAlreadyExistsError(BaseAPIException):
+
+    def __init__(self, custom_message: str = None):
+        super().__init__(ErrorCode.EMAIL_ALREADY_EXISTS, custom_message)
+
+
+class NicknameAlreadyExistsError(BaseAPIException):
+
+    def __init__(self, custom_message: str = None):
+        super().__init__(ErrorCode.NICKNAME_ALREADY_EXISTS, custom_message)
+
+
+class InvalidPasswordError(BaseAPIException):
+
+    def __init__(self, custom_message: str = None):
+        super().__init__(ErrorCode.INVALID_PASSWORD, custom_message)
+
+
+class InternalServerError(BaseAPIException):
+
+    def __init__(self, custom_message: str = None):
+        super().__init__(ErrorCode.INTERNAL_SERVER_ERROR, custom_message)
+
+
+class DatabaseError(BaseAPIException):
+
+    def __init__(self, custom_message: str = None):
+        super().__init__(ErrorCode.DATABASE_ERROR, custom_message)

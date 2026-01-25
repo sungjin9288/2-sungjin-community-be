@@ -1,11 +1,10 @@
-
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 import logging
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles  
-from app.routes import router as api_router
-from app.common.exceptions import BusinessException, ErrorCodes
-from app.common.responses import fail
+from pathlib import Path
+
+from app.routes import auth, users, posts, comments, images
 
 # 로깅 설정
 logging.basicConfig(
@@ -14,77 +13,52 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = FastAPI(
-    title="커뮤니티 API",
-    description="아무 말 대잔치 - FastAPI 기반 커뮤니티 백엔드",
-    version="1.0.0"
+app = FastAPI(title="Community API", version="1.0.0")
+
+# CORS 설정
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3001",
+        "http://127.0.0.1:3001"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
+# 업로드 디렉토리 분리
+uploads_dir = Path("uploads")
+uploads_dir.mkdir(exist_ok=True)
+(uploads_dir / "profile").mkdir(exist_ok=True)
+(uploads_dir / "post").mkdir(exist_ok=True)
 
-# ==================== 정적 파일 서빙 ====================
+# Static 파일 제공 (CSS, JS, 이미지 등)
+static_dir = Path("static")
+static_dir.mkdir(exist_ok=True)
 
-# 이용약관 등 정적 HTML 파일 서빙
 app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
+# 라우터 등록
+app.include_router(auth.router)
+app.include_router(users.router)
+app.include_router(posts.router)
+app.include_router(comments.router)
+app.include_router(images.router)
 
-# ==================== 예외 핸들러 ====================
+@app.get("/")
+async def root():
+    return {"message": "Community API Server"}
 
-@app.exception_handler(BusinessException)
-async def business_exception_handler(request: Request, exc: BusinessException):
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
 
-    logger.warning(
-        f"Business exception: {exc.code}",
-        extra={
-            "path": request.url.path,
-            "method": request.method,
-            "error_message": exc.message,
-            "status_code": exc.status_code
-        }
-    )
-    return fail(exc.status_code, exc.message, exc.data)
-
-
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-
-    logger.error(
-        f"Unhandled exception: {type(exc).__name__}: {exc}",
-        extra={
-            "path": request.url.path,
-            "method": request.method,
-            "client": request.client.host if request.client else "unknown",
-        },
-        exc_info=True  # 스택 트레이스 포함
-    )
-    
-    code, msg, status = ErrorCodes.INTERNAL_SERVER_ERROR
-    return fail(status, msg, None)
-
-
-# ==================== 미들웨어 ====================
 
 @app.middleware("http")
-async def log_requests(request: Request, call_next):
-
+async def log_requests(request, call_next):
     logger.info(f"Request: {request.method} {request.url.path}")
     response = await call_next(request)
     logger.info(f"Response: {response.status_code}")
     return response
-
-
-# ==================== 라우터 등록 ====================
-
-app.include_router(api_router)
-
-
-# ==================== 헬스 체크 ====================
-
-@app.get("/health")
-def health_check():
-
-    return {"status": "healthy"}
-
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)

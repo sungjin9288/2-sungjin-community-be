@@ -1,4 +1,3 @@
-
 import re
 from fastapi.responses import JSONResponse
 from app.common.responses import ok, created, fail
@@ -33,13 +32,52 @@ def _validate_nickname(nickname: str) -> None:
 
 def _validate_password(password: str) -> None:
     
-    if len(password) < 6:
+    if len(password) < 8:
         raise BusinessException(
             "invalid_password_policy",
-            "비밀번호는 최소 6자 이상이어야 합니다.",
+            "비밀번호는 최소 8자 이상이어야 합니다.",
             422,
-            data={"reason": "too_short", "min_length": 6}
+            data={"reason": "too_short", "min_length": 8}
         )
+
+
+def check_email(payload: dict) -> JSONResponse:
+    """
+    이메일 중복 확인
+    
+    Args:
+        payload: {"email": "user@example.com"}
+    
+    Returns:
+        {"available": true/false, "message": "..."}
+    """
+    email = (payload.get("email") or "").strip()
+    
+    # 이메일 필수 확인
+    if not email:
+        raise BusinessException(*ErrorCodes.MISSING_REQUIRED_FIELDS)
+    
+    # 이메일 형식 검증
+    if not _validate_email(email):
+        raise BusinessException(*ErrorCodes.INVALID_EMAIL_FORMAT)
+    
+    # 이메일 중복 확인
+    if users_model.is_email_exists(email):
+        return ok(
+            message="email_already_exists",
+            data={
+                "available": False,
+                "email": email
+            }
+        )
+    
+    return ok(
+        message="email_available",
+        data={
+            "available": True,
+            "email": email
+        }
+    )
 
 
 def signup(payload: dict) -> JSONResponse:
