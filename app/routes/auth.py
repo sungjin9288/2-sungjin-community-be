@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Response, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr
 
 from app.controllers import auth_controller
-from app.common import responses, exceptions
-from app.common.deps import get_current_user_id
+from app.common import responses
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -32,55 +32,61 @@ class CheckEmailRequest(BaseModel):
 
 @router.post("/signup", status_code=status.HTTP_201_CREATED)
 async def signup(payload: SignupRequest):
-
-    try:
-        result = auth_controller.signup(
-            email=payload.email,
-            password=payload.password,
-            nickname=payload.nickname
-        )
-        return responses.success(result)
-    except exceptions.EmailAlreadyExistsError as e:
-        return responses.error(e.error_code, e.message, e.status_code)
-    except exceptions.InvalidPasswordError as e:
-        return responses.error(e.error_code, e.message, e.status_code)
+    # BusinessException은 HTTPException을 상속하므로 자동으로 처리됨
+    result = auth_controller.signup(
+        email=payload.email,
+        password=payload.password,
+        nickname=payload.nickname
+    )
+    return responses.created("signup_success", result)
 
 
 @router.post("/login")
-async def login(payload: LoginRequest, response: Response):
-
-    try:
-        result = auth_controller.login(
-            email=payload.email,
-            password=payload.password
-        )
-        
-        # 세션 쿠키 설정
-        response.set_cookie(
-            key="session_id",
-            value=result["session_id"],
-            httponly=True,
-            samesite="lax",
-            secure=False  # 개발 환경
-        )
-        
-        return responses.success({"message": "login_success"})
-    except exceptions.InvalidCredentialsError as e:
-        return responses.error(e.error_code, e.message, e.status_code)
+async def login(payload: LoginRequest):
+    result = auth_controller.login(
+        email=payload.email,
+        password=payload.password
+    )
+    
+    # ✅ JSONResponse를 직접 생성하고 쿠키 설정
+    response = JSONResponse(
+        content={"message": "login_success", "data": None}
+    )
+    
+    # 세션 쿠키 설정
+    response.set_cookie(
+        key="session_id",
+        value=result["session_id"],
+        httponly=True,
+        samesite="lax",
+        secure=False,  # 개발 환경
+        path="/",  # 모든 경로에서 쿠키 사용
+    )
+    
+    return response
 
 
 @router.post("/logout")
-async def logout(response: Response, user_id: int = get_current_user_id):
-
-    # 세션 쿠키 삭제
-    response.delete_cookie(key="session_id")
-    return responses.success({"message": "logout_success"})
+async def logout():
+    # ✅ JSONResponse 생성 후 쿠키 삭제
+    response = JSONResponse(
+        content={"message": "logout_success", "data": None}
+    )
+    response.delete_cookie(key="session_id", path="/")
+    return response
 
 
 @router.post("/check-email")
 async def check_email(payload: CheckEmailRequest):
-    try:
-        result = auth_controller.check_email(email=payload.email)
-        return responses.success(result)
-    except exceptions.EmailAlreadyExistsError as e:
-        return responses.error(e.error_code, e.message, e.status_code)
+    result = auth_controller.check_email(email=payload.email)
+    return responses.ok("email_available", result)
+
+
+class CheckNicknameRequest(BaseModel):
+    nickname: str
+
+
+@router.post("/check-nickname")
+async def check_nickname(payload: CheckNicknameRequest):
+    result = auth_controller.check_nickname(nickname=payload.nickname)
+    return responses.ok("nickname_available", result)

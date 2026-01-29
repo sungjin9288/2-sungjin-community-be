@@ -4,24 +4,34 @@ from fastapi.staticfiles import StaticFiles
 import logging
 from pathlib import Path
 
+from app import db_models
+from app.database import engine
+
 from app.routes import auth, users, posts, comments, images
 
 # 로깅 설정
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler("debug.log", encoding='utf-8')
+    ]
 )
 logger = logging.getLogger(__name__)
 
+
+db_models.Base.metadata.create_all(bind=engine)
+
 app = FastAPI(title="Community API", version="1.0.0")
 
-# CORS 설정
+# CORS 설정 - 쿠키 인증을 위해 구체적인 origin 필요
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3001",
-        "http://127.0.0.1:3001"
-    ],
+        "http://localhost:3001",  # 프론트엔드 개발 서버
+        "http://127.0.0.1:3001",
+    ], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

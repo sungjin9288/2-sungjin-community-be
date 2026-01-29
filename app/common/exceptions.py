@@ -1,10 +1,7 @@
 from enum import Enum
-from typing import Tuple
-
+from fastapi import HTTPException
 
 class ErrorCode(Enum):
-
-    
     # 400 Bad Request
     MISSING_REQUIRED_FIELDS = ("missing_required_fields", "필수 값이 없습니다", 400)
     INVALID_REQUEST_FORMAT = ("invalid_request_format", "요청 형식이 올바르지 않습니다", 400)
@@ -41,123 +38,92 @@ class ErrorCode(Enum):
     
     @property
     def code(self) -> str:
-
         return self.value[0]
     
     @property
     def message(self) -> str:
-
         return self.value[1]
     
     @property
     def status_code(self) -> int:
-
         return self.value[2]
 
 
-# ==================== 커스텀 예외 클래스 ====================
+# ==================== 커스텀 예외 클래스 (수정됨) ====================
 
-class BaseAPIException(Exception):
-
-    
+# ★ 중요 수정: 이름을 BusinessException으로 변경하고 HTTPException을 상속받음
+class BusinessException(HTTPException):
     def __init__(self, error_code: ErrorCode, custom_message: str = None):
+        super().__init__(
+            status_code=error_code.status_code,
+            detail=custom_message or error_code.message
+        )
         self.error_code = error_code.code
-        self.message = custom_message or error_code.message
-        self.status_code = error_code.status_code
-        super().__init__(self.message)
 
 
-class MissingRequiredFieldsError(BaseAPIException):
+# 아래 클래스들은 BusinessException을 상속받도록 연결해두었습니다.
+# 필요할 때 편하게 골라 쓸 수 있습니다.
 
+class MissingRequiredFieldsError(BusinessException):
     def __init__(self, custom_message: str = None):
         super().__init__(ErrorCode.MISSING_REQUIRED_FIELDS, custom_message)
 
-
-class InvalidRequestFormatError(BaseAPIException):
-
+class InvalidRequestFormatError(BusinessException):
     def __init__(self, custom_message: str = None):
         super().__init__(ErrorCode.INVALID_REQUEST_FORMAT, custom_message)
 
-
-class InvalidPagingParamsError(BaseAPIException):
-
+class InvalidPagingParamsError(BusinessException):
     def __init__(self, custom_message: str = None):
         super().__init__(ErrorCode.INVALID_PAGING_PARAMS, custom_message)
 
-
-class InvalidEmailFormatError(BaseAPIException):
-
+class InvalidEmailFormatError(BusinessException):
     def __init__(self, custom_message: str = None):
         super().__init__(ErrorCode.INVALID_EMAIL_FORMAT, custom_message)
 
-
-class UnauthorizedError(BaseAPIException):
-
+class UnauthorizedError(BusinessException):
     def __init__(self, custom_message: str = None):
         super().__init__(ErrorCode.UNAUTHORIZED, custom_message)
 
-
-class InvalidCredentialsError(BaseAPIException):
-
+class InvalidCredentialsError(BusinessException):
     def __init__(self, custom_message: str = None):
         super().__init__(ErrorCode.INVALID_CREDENTIALS, custom_message)
 
-
-class ForbiddenError(BaseAPIException):
-
+class ForbiddenError(BusinessException):
     def __init__(self, custom_message: str = None):
         super().__init__(ErrorCode.FORBIDDEN, custom_message)
 
-
-class EmailNotFoundError(BaseAPIException):
-
+class EmailNotFoundError(BusinessException):
     def __init__(self, custom_message: str = None):
         super().__init__(ErrorCode.EMAIL_NOT_FOUND, custom_message)
 
-
-class UserNotFoundError(BaseAPIException):
-
+class UserNotFoundError(BusinessException):
     def __init__(self, custom_message: str = None):
         super().__init__(ErrorCode.USER_NOT_FOUND, custom_message)
 
-
-class PostNotFoundError(BaseAPIException):
-
+class PostNotFoundError(BusinessException):
     def __init__(self, custom_message: str = None):
         super().__init__(ErrorCode.POST_NOT_FOUND, custom_message)
 
-
-class CommentNotFoundError(BaseAPIException):
-
+class CommentNotFoundError(BusinessException):
     def __init__(self, custom_message: str = None):
         super().__init__(ErrorCode.COMMENT_NOT_FOUND, custom_message)
 
-
-class EmailAlreadyExistsError(BaseAPIException):
-
+class EmailAlreadyExistsError(BusinessException):
     def __init__(self, custom_message: str = None):
         super().__init__(ErrorCode.EMAIL_ALREADY_EXISTS, custom_message)
 
-
-class NicknameAlreadyExistsError(BaseAPIException):
-
+class NicknameAlreadyExistsError(BusinessException):
     def __init__(self, custom_message: str = None):
         super().__init__(ErrorCode.NICKNAME_ALREADY_EXISTS, custom_message)
 
-
-class InvalidPasswordError(BaseAPIException):
-
+class InvalidPasswordError(BusinessException):
     def __init__(self, custom_message: str = None):
         super().__init__(ErrorCode.INVALID_PASSWORD, custom_message)
 
-
-class InternalServerError(BaseAPIException):
-
+class InternalServerError(BusinessException):
     def __init__(self, custom_message: str = None):
         super().__init__(ErrorCode.INTERNAL_SERVER_ERROR, custom_message)
 
-
-class DatabaseError(BaseAPIException):
-
+class DatabaseError(BusinessException):
     def __init__(self, custom_message: str = None):
         super().__init__(ErrorCode.DATABASE_ERROR, custom_message)

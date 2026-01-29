@@ -1,59 +1,83 @@
-from typing import Optional
-from app.models import users_model
+from datetime import datetime
+from app.database import SessionLocal
+from app.db_models import Comment, User
 
-_comments: dict[int, dict] = {}
-_comment_seq: int = 1
+# ★ 수정: 날짜(datetime)를 문자열로 변환하는 로직 추가
+def _to_dict(obj):
+    if not obj: return None
+    data = {}
+    for c in obj.__table__.columns:
+        val = getattr(obj, c.name)
+        if isinstance(val, datetime):
+            val = val.isoformat()
+        data[c.name] = val
+    return data
 
+def list_comments(post_id: int, user_id: int | None = None) -> list[dict]:
+    db = SessionLocal()
+    try:
+        comments = db.query(Comment).filter(Comment.post_id == post_id).all()
+        results = []
+        for c in comments:
+            c_dict = _to_dict(c)
+            c_dict["author_nickname"] = c.owner.nickname if c.owner else "Unknown"
+            c_dict["author_profile_image"] = c.owner.profile_image_url if c.owner else None
+            
+            # 본인 댓글 여부 확인
+            if user_id:
+                c_dict["is_author"] = (c.user_id == user_id)
+            else:
+                c_dict["is_author"] = False
+                
+            results.append(c_dict)
+        return results
+    finally:
+        db.close()
 
-def list_comments(post_id: int) -> list[dict]:
-    """댓글 목록 조회 (작성자 정보 포함)"""
-    comments = [c for c in _comments.values() if c["post_id"] == post_id]
-    
-    # ⭐ 작성자 정보 추가
-    result = []
-    for c in comments:
-        comment = c.copy()
-        user = users_model.get_user_by_id(c["user_id"])
-        if user:
-            comment["author_nickname"] = user.get("nickname", "Unknown")
-            comment["author_profile_image"] = user.get("profile_image_url")
-        result.append(comment)
-    
-    return result
-
-
-def find_comment(comment_id: int) -> Optional[dict]:
-    """댓글 조회"""
-    return _comments.get(comment_id)
-
+def find_comment(comment_id: int) -> dict | None:
+    db = SessionLocal()
+    try:
+        comment = db.query(Comment).filter(Comment.id == comment_id).first()
+        return _to_dict(comment)
+    finally:
+        db.close()
 
 def create_comment(user_id: int, post_id: int, content: str) -> dict:
-    """댓글 생성"""
-    global _comment_seq
-    comment = {
-        "id": _comment_seq,
-        "user_id": user_id,
-        "post_id": post_id,
-        "content": content
-    }
-    _comments[_comment_seq] = comment
-    _comment_seq += 1
-    
-    # ⭐ 작성자 정보 추가
-    result = comment.copy()
-    user = users_model.get_user_by_id(user_id)
-    if user:
-        result["author_nickname"] = user.get("nickname", "Unknown")
-        result["author_profile_image"] = user.get("profile_image_url")
-    
-    return result
+    db = SessionLocal()
+    try:
+        new_comment = Comment(user_id=user_id, post_id=post_id, content=content)
+        db.add(new_comment)
+        db.commit()
+        db.refresh(new_comment)
+        
+        res = _to_dict(new_comment)
+        res["author_nickname"] = new_comment.owner.nickname
+        res["author_profile_image"] = new_comment.owner.profile_image_url
+        return res
+    finally:
+        db.close()
 
+def update_comment(comment_id: int, content: str) -> dict | None:
+    db = SessionLocal()
+    try:
+        comment = db.query(Comment).filter(Comment.id == comment_id).first()
+        if not comment: return None
+        
+        comment.content = content
+        db.commit()
+        db.refresh(comment)
+        
+        res = _to_dict(comment)
+        res["author_nickname"] = comment.owner.nickname
+        res["author_profile_image"] = comment.owner.profile_image_url
+        return res
+    finally:
+        db.close()
 
-def delete_comment(comment_id: int) -> None:
-    """댓글 삭제"""
-    _comments.pop(comment_id, None)
-
-
-def get_comment_count(post_id: int) -> int:
-    """게시글의 댓글 수 조회"""
-    return sum(1 for c in _comments.values() if c["post_id"] == post_id)
+def delete_comment(comment_id: int):
+    db = SessionLocal()
+    try:
+        db.query(Comment).filter(Comment.id == comment_id).delete()
+        db.commit()
+    finally:
+        db.close()

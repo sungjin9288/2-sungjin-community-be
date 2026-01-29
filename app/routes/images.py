@@ -48,7 +48,7 @@ async def upload_profile_image(file: UploadFile = File(...)):
         
         logger.info(f"프로필 이미지 업로드 성공: {image_url}")
         
-        return responses.success({
+        return responses.ok("upload_success", {
             "image_url": image_url,
             "filename": unique_filename
         })
@@ -94,7 +94,7 @@ async def upload_post_image(file: UploadFile = File(...)):
         
         logger.info(f"게시글 이미지 업로드 성공: {image_url}")
         
-        return responses.success({
+        return responses.ok("upload_success", {
             "image_url": image_url,
             "filename": unique_filename
         })
