@@ -1,84 +1,95 @@
+import os
+
 from app.common.exceptions import (
-    MissingRequiredFieldsError, 
-    InvalidCredentialsError, 
-    UnauthorizedError,
     EmailAlreadyExistsError,
+    InvalidCredentialsError,
     InvalidPasswordError,
-    NicknameAlreadyExistsError
+    InvalidRequestFormatError,
+    MissingRequiredFieldsError,
+    NicknameAlreadyExistsError,
 )
-from app.common.security import verify_password, hash_password
+from app.common.jwt_tokens import ACCESS_TOKEN_EXPIRE_MINUTES, create_access_token
+from app.common.security import hash_password, verify_password
 from app.models import users_model
+
+REFRESH_TOKEN_TTL_DAYS = int(os.getenv("REFRESH_TOKEN_TTL_DAYS", "14"))
 
 
 def signup(email: str, password: str, nickname: str) -> dict:
-    """회원가입"""
-    # 이메일 중복 확인
     if users_model.is_email_exists(email):
         raise EmailAlreadyExistsError()
-    
-    # 닉네임 중복 확인
     if users_model.is_nickname_exists(nickname):
         raise NicknameAlreadyExistsError()
-    
-    # 비밀번호 검증 (8자 이상)
     if len(password) < 8:
-        raise InvalidPasswordError("비밀번호는 8자 이상이어야 합니다")
-    
-    # 비밀번호 해시화
-    password_hash = hash_password(password)
-    
-    # 사용자 생성
+        raise InvalidPasswordError("비밀번호는 8자 이상이어야 합니다.")
+
     user = users_model.create_user(
         email=email,
-        password_hash=password_hash,
-        nickname=nickname
+        password_hash=hash_password(password),
+        nickname=nickname,
     )
-    
     if not user:
         raise EmailAlreadyExistsError()
-    
+
     return {
         "id": user["id"],
         "email": user["email"],
-        "nickname": user["nickname"]
+        "nickname": user["nickname"],
     }
 
 
 def check_email(email: str) -> dict:
-    """이메일 중복 확인"""
     if users_model.is_email_exists(email):
         raise EmailAlreadyExistsError()
-    
-    return {"available": True, "message": "사용 가능한 이메일입니다"}
+    return {"available": True, "message": "사용 가능한 이메일입니다."}
 
 
 def check_nickname(nickname: str) -> dict:
-    """닉네임 중복 확인"""
-    from app.common.exceptions import NicknameAlreadyExistsError
     if users_model.is_nickname_exists(nickname):
         raise NicknameAlreadyExistsError()
-    
-    return {"available": True, "message": "사용 가능한 닉네임입니다"}
+    return {"available": True, "message": "사용 가능한 닉네임입니다."}
 
 
 def login(email: str, password: str) -> dict:
-    """로그인"""
     if not email or not password:
         raise MissingRequiredFieldsError()
 
     user = users_model.find_user_by_email(email)
-    
-    if not user or not verify_password(password, user.get("password") or user.get("password_hash", "")):
+    if not user:
+        raise InvalidCredentialsError()
+    if not verify_password(password, user["password"]):
         raise InvalidCredentialsError()
 
-    session_id = users_model.create_session(user_id=user["id"])
-    
-    return {"session_id": session_id}
+    access_token = create_access_token(user["id"])
+    refresh_token = users_model.create_session(user_id=user["id"], ttl_days=REFRESH_TOKEN_TTL_DAYS)
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    }
 
 
-def logout(session_id: str | None) -> None:
-    """로그아웃"""
-    if not session_id:
-        raise UnauthorizedError()
+def refresh(refresh_token: str) -> dict:
+    if not refresh_token:
+        raise MissingRequiredFieldsError("refresh_token이 필요합니다.")
 
-    users_model.delete_session(session_id)
+    user_id = users_model.get_user_id_by_session(refresh_token)
+    if not user_id:
+        raise InvalidRequestFormatError("유효하지 않거나 만료된 refresh_token 입니다.")
+
+    users_model.delete_session(refresh_token)
+    new_refresh_token = users_model.create_session(user_id=user_id, ttl_days=REFRESH_TOKEN_TTL_DAYS)
+    new_access_token = create_access_token(user_id)
+
+    return {
+        "access_token": new_access_token,
+        "refresh_token": new_refresh_token,
+        "token_type": "bearer",
+        "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    }
+
+
+def logout(refresh_token: str | None) -> None:
+    if refresh_token:
+        users_model.delete_session(refresh_token)

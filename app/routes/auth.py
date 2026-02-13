@@ -1,42 +1,45 @@
-from fastapi import APIRouter, Response, status
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, EmailStr
+from fastapi import APIRouter, status
+from pydantic import BaseModel, EmailStr, Field
 
-from app.controllers import auth_controller
 from app.common import responses
+from app.controllers import auth_controller
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-# ==================== DTO 정의 ====================
-
 class SignupRequest(BaseModel):
-
     email: EmailStr
-    password: str
-    nickname: str
+    password: str = Field(..., min_length=8)
+    nickname: str = Field(..., min_length=1, max_length=10)
 
 
 class LoginRequest(BaseModel):
-
     email: EmailStr
     password: str
 
 
 class CheckEmailRequest(BaseModel):
-
     email: EmailStr
 
 
-# ==================== 라우트 ====================
+class CheckNicknameRequest(BaseModel):
+    nickname: str
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class LogoutRequest(BaseModel):
+    refresh_token: str | None = None
+
 
 @router.post("/signup", status_code=status.HTTP_201_CREATED)
 async def signup(payload: SignupRequest):
-    # BusinessException은 HTTPException을 상속하므로 자동으로 처리됨
     result = auth_controller.signup(
         email=payload.email,
         password=payload.password,
-        nickname=payload.nickname
+        nickname=payload.nickname,
     )
     return responses.created("signup_success", result)
 
@@ -45,45 +48,28 @@ async def signup(payload: SignupRequest):
 async def login(payload: LoginRequest):
     result = auth_controller.login(
         email=payload.email,
-        password=payload.password
+        password=payload.password,
     )
-    
-    # ✅ JSONResponse를 직접 생성하고 쿠키 설정
-    response = JSONResponse(
-        content={"message": "login_success", "data": None}
-    )
-    
-    # 세션 쿠키 설정
-    response.set_cookie(
-        key="session_id",
-        value=result["session_id"],
-        httponly=True,
-        samesite="lax",
-        secure=False,  # 개발 환경
-        path="/",  # 모든 경로에서 쿠키 사용
-    )
-    
-    return response
+    return responses.ok("login_success", result)
+
+
+@router.post("/refresh")
+async def refresh(payload: RefreshRequest):
+    result = auth_controller.refresh(payload.refresh_token)
+    return responses.ok("refresh_success", result)
 
 
 @router.post("/logout")
-async def logout():
-    # ✅ JSONResponse 생성 후 쿠키 삭제
-    response = JSONResponse(
-        content={"message": "logout_success", "data": None}
-    )
-    response.delete_cookie(key="session_id", path="/")
-    return response
+async def logout(payload: LogoutRequest | None = None):
+    refresh_token = payload.refresh_token if payload else None
+    auth_controller.logout(refresh_token)
+    return responses.ok("logout_success", None)
 
 
 @router.post("/check-email")
 async def check_email(payload: CheckEmailRequest):
     result = auth_controller.check_email(email=payload.email)
     return responses.ok("email_available", result)
-
-
-class CheckNicknameRequest(BaseModel):
-    nickname: str
 
 
 @router.post("/check-nickname")

@@ -7,3 +7,6 @@ passlib
 sqlalchemy
 pymysql
 cryptography
+email-validator
+alembic
+PyJWT

@@ -1,20 +1,26 @@
-
 from typing import Optional
+
 from fastapi import Request
-from app.models import users_model
 
-SESSION_COOKIE_NAME = "session_id"
+from app.common.jwt_tokens import decode_access_token
 
 
-def get_session_id_from_request(request: Request) -> Optional[str]:
-
-    sid = request.cookies.get(SESSION_COOKIE_NAME)
-    return sid or None
+def get_bearer_token_from_request(request: Request) -> Optional[str]:
+    header = request.headers.get("Authorization")
+    if not header:
+        return None
+    parts = header.split(" ", 1)
+    if len(parts) != 2:
+        return None
+    scheme, token = parts
+    if scheme.lower() != "bearer":
+        return None
+    token = token.strip()
+    return token or None
 
 
 def get_user_id_from_request(request: Request) -> Optional[int]:
-
-    sid = get_session_id_from_request(request)
-    if not sid:
+    access_token = get_bearer_token_from_request(request)
+    if not access_token:
         return None
-    return users_model.get_user_id_by_session(sid)
+    return decode_access_token(access_token)

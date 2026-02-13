@@ -159,3 +159,81 @@ ENVIRONMENT=production
 pip install gunicorn
 gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker
 ```
+---
+
+## 2026 Updated Runbook
+
+### Environment Variables (recommended)
+
+```bash
+# Database
+DATABASE_URL=sqlite:///./community.db
+
+# App behavior
+AUTO_CREATE_TABLES=true
+CORS_ALLOW_ORIGINS=http://localhost:3001,http://127.0.0.1:3001
+
+# Session cookie
+SESSION_COOKIE_NAME=session_id
+SESSION_COOKIE_MAX_AGE=604800
+SESSION_COOKIE_SECURE=false
+SESSION_COOKIE_SAMESITE=lax
+```
+
+### Alembic Migration
+
+```bash
+pip install -r requirements.txt
+alembic upgrade head
+```
+
+### Run Server
+
+```bash
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### Run Regression Tests
+
+```bash
+python -m pytest -q
+```
+
+### Existing DB Migration Baseline
+
+If your DB already has tables from `create_all`, run:
+
+```bash
+alembic stamp 20260211_000001
+```
+
+Then continue with future migrations using:
+
+```bash
+alembic upgrade head
+```
+
+### JWT Auth Usage
+
+Login and receive tokens:
+
+```bash
+curl -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user@example.com","password":"Abcd1234!"}'
+```
+
+Use access token:
+
+```bash
+curl http://localhost:8000/users/me \
+  -H "Authorization: Bearer <access_token>"
+```
+
+Refresh token:
+
+```bash
+curl -X POST http://localhost:8000/auth/refresh \
+  -H "Content-Type: application/json" \
+  -d '{"refresh_token":"<refresh_token>"}'
+```

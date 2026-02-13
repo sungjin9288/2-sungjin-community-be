@@ -358,3 +358,91 @@ logger.info(
 
 ---
 Copyright © 2026 Sungjin An. All rights reserved.
+
+---
+
+## 2026 Refactor Update
+
+This project has been refactored with a focus on security, consistency, and feed scalability.
+
+### Core Changes
+
+- DB connection is now environment-based (`DATABASE_URL`) with local SQLite fallback.
+- Session storage moved from in-memory map to DB table (`sessions`).
+- Logout now invalidates server-side session and clears cookie.
+- Post feed now supports:
+  - sorting: `latest`, `hot`, `discussed`
+  - tag filter: `GET /posts?tag=python`
+  - trending endpoint: `GET /posts/trending`
+- Like duplication is protected by DB-level unique constraint.
+- Unified API error response format via global exception handlers.
+
+### New Environment Variables
+
+- `DATABASE_URL`
+- `AUTO_CREATE_TABLES` (`true`/`false`)
+- `CORS_ALLOW_ORIGINS` (comma-separated)
+- `SESSION_COOKIE_NAME`
+- `SESSION_COOKIE_MAX_AGE` (seconds)
+- `SESSION_COOKIE_SECURE` (`true`/`false`)
+- `SESSION_COOKIE_SAMESITE` (`lax`/`strict`/`none`)
+
+### Migration (Alembic)
+
+```bash
+pip install -r requirements.txt
+alembic upgrade head
+```
+
+Current baseline migration:
+- `migrations/versions/20260211_000001_initial_schema.py`
+
+### Regression Tests
+
+```bash
+python -m pytest -q
+```
+
+Added test coverage includes:
+- auth session lifecycle (login/logout/session invalidation)
+- password change guard
+- posts tags/filter/trending
+- like idempotency / duplicate like blocking
+- invalid sort parameter handling
+
+### Existing DB Note
+
+If tables were already created before Alembic setup, `alembic upgrade head` can fail with "table already exists".
+In that case, register current schema as baseline first:
+
+```bash
+alembic stamp 20260211_000001
+```
+
+After that, use:
+
+```bash
+alembic upgrade head
+```
+
+### Auth Model Update (JWT)
+
+Authentication has been upgraded from cookie-session to token-based auth.
+
+- `POST /auth/login` now returns:
+  - `access_token`
+  - `refresh_token`
+  - `token_type` (`bearer`)
+  - `expires_in`
+- Protected endpoints require:
+  - `Authorization: Bearer <access_token>`
+- Token renewal:
+  - `POST /auth/refresh` with `refresh_token`
+- Logout:
+  - `POST /auth/logout` with optional `refresh_token` (revokes refresh token if provided)
+
+JWT-related environment variables:
+- `JWT_SECRET_KEY` (recommend 32+ chars)
+- `JWT_ALGORITHM` (default `HS256`)
+- `ACCESS_TOKEN_EXPIRE_MINUTES` (default `30`)
+- `REFRESH_TOKEN_TTL_DAYS` (default `14`)
