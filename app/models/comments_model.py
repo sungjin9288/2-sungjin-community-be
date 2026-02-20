@@ -16,7 +16,10 @@ def _to_dict(obj):
 def list_comments(post_id: int, user_id: int | None = None) -> list[dict]:
     db = SessionLocal()
     try:
-        comments = db.query(Comment).filter(Comment.post_id == post_id).all()
+        comments = db.query(Comment).filter(
+            Comment.post_id == post_id,
+            Comment.deleted_at.is_(None)
+        ).all()
         results = []
         for c in comments:
             c_dict = _to_dict(c)

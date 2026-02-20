@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 
 from sqlalchemy import case, desc, func
@@ -137,7 +137,7 @@ def list_posts(
             .subquery()
         )
 
-        query = db.query(Post).options(joinedload(Post.owner))
+        query = db.query(Post).options(joinedload(Post.owner)).filter(Post.deleted_at.is_(None))
         if tag:
             query = (
                 query.join(PostTag, PostTag.post_id == Post.id)
@@ -224,7 +224,12 @@ def create_post(
 def find_post(post_id: int, current_user_id: int | None = None) -> dict | None:
     db = SessionLocal()
     try:
-        post = db.query(Post).options(joinedload(Post.owner)).filter(Post.id == post_id).first()
+        post = (
+            db.query(Post)
+            .options(joinedload(Post.owner))
+            .filter(Post.id == post_id, Post.deleted_at.is_(None))
+            .first()
+        )
         if not post:
             return None
         return _serialize_posts_batch(db, [post], current_user_id)[0]
@@ -341,7 +346,7 @@ def get_trending(
 ) -> dict:
     db = SessionLocal()
     try:
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
         likes_subq = (
             db.query(Like.post_id.label("post_id"), func.count(Like.id).label("likes_count"))
@@ -366,7 +371,7 @@ def get_trending(
             .options(joinedload(Post.owner))
             .outerjoin(likes_subq, likes_subq.c.post_id == Post.id)
             .outerjoin(comments_subq, comments_subq.c.post_id == Post.id)
-            .filter(Post.created_at >= cutoff)
+            .filter(Post.created_at >= cutoff, Post.deleted_at.is_(None))
             .order_by(desc(hot_score), desc(Post.created_at))
             .limit(limit)
             .all()
@@ -376,7 +381,7 @@ def get_trending(
             db.query(Tag.name, func.count(PostTag.id).label("count"))
             .join(PostTag, Tag.id == PostTag.tag_id)
             .join(Post, Post.id == PostTag.post_id)
-            .filter(Post.created_at >= cutoff)
+            .filter(Post.created_at >= cutoff, Post.deleted_at.is_(None))
             .group_by(Tag.name)
             .order_by(desc(func.count(PostTag.id)), Tag.name.asc())
             .limit(limit)

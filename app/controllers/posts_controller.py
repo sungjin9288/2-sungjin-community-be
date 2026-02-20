@@ -19,10 +19,10 @@ TAG_PATTERN = re.compile(r"^[0-9A-Za-z가-힣_-]+$")
 
 
 def _validate_title(title: str) -> None:
-    if len(title) > 26:
+    if len(title) > 50:
         raise BusinessException(
             ErrorCode.INVALID_REQUEST_FORMAT,
-            "제목은 최대 26자까지 작성 가능합니다.",
+            "제목은 최대 50자까지 작성 가능합니다.",
         )
 
 

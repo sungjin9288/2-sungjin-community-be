@@ -1,5 +1,6 @@
 import logging
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -12,78 +13,56 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app import db_models
 from app.common.exceptions import BusinessException
 from app.common.responses import fail
+from app.core.logger import setup_logging
 from app.database import engine
 from app.routes import auth, comments, images, posts, users
 
 
-def _env_bool(name: str, default: bool = False) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+# -------------------------
+# Logging
+# -------------------------
 
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler("debug.log", encoding="utf-8"),
-    ],
-)
+setup_logging()
 logger = logging.getLogger(__name__)
 
 
-AUTO_CREATE_TABLES = _env_bool("AUTO_CREATE_TABLES", default=True)
-if AUTO_CREATE_TABLES:
-    db_models.Base.metadata.create_all(bind=engine)
+# -------------------------
+# FastAPI App & Lifespan
+# -------------------------
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: logging is already setup
+    logger.info("Application starting up...")
+    
+    # Ensure upload directories exist
+    uploads_dir = Path("uploads")
+    uploads_dir.mkdir(exist_ok=True)
+    (uploads_dir / "profile").mkdir(exist_ok=True)
+    (uploads_dir / "post").mkdir(exist_ok=True)
+
+    static_dir = Path("static")
+    static_dir.mkdir(exist_ok=True)
+    
+    yield
+    
+    # Shutdown
+    logger.info("Application shutting down...")
+
+app = FastAPI(title="Community API", version="1.1.0", lifespan=lifespan)
 
 
-def _ensure_like_unique_index() -> None:
-    inspector = inspect(engine)
-    try:
-        unique_constraints = inspector.get_unique_constraints("likes")
-    except Exception:
-        return
-
-    has_unique = any(
-        set(constraint.get("column_names") or []) == {"user_id", "post_id"}
-        for constraint in unique_constraints
-    )
-    if has_unique:
-        return
-
-    with engine.begin() as conn:
-        dialect = conn.dialect.name
-        if dialect == "mysql":
-            index_rows = conn.execute(
-                text("SHOW INDEX FROM likes WHERE Key_name = 'uq_like_user_post'")
-            ).fetchall()
-            if not index_rows:
-                conn.execute(
-                    text("CREATE UNIQUE INDEX uq_like_user_post ON likes (user_id, post_id)")
-                )
-            return
-
-        if dialect == "sqlite":
-            conn.execute(
-                text("CREATE UNIQUE INDEX IF NOT EXISTS uq_like_user_post ON likes (user_id, post_id)")
-            )
-            return
-
-        conn.execute(
-            text("CREATE UNIQUE INDEX IF NOT EXISTS uq_like_user_post ON likes (user_id, post_id)")
-        )
-
-
-_ensure_like_unique_index()
-
-
-app = FastAPI(title="Community API", version="1.1.0")
-
+# -------------------------
+# CORS
+# -------------------------
 
 default_origins = "http://localhost:3001,http://127.0.0.1:3001"
-allow_origins = [origin.strip() for origin in os.getenv("CORS_ALLOW_ORIGINS", default_origins).split(",") if origin.strip()]
+allow_origins = [
+    origin.strip()
+    for origin in os.getenv("CORS_ALLOW_ORIGINS", default_origins).split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allow_origins,
@@ -93,17 +72,17 @@ app.add_middleware(
 )
 
 
-uploads_dir = Path("uploads")
-uploads_dir.mkdir(exist_ok=True)
-(uploads_dir / "profile").mkdir(exist_ok=True)
-(uploads_dir / "post").mkdir(exist_ok=True)
-
-static_dir = Path("static")
-static_dir.mkdir(exist_ok=True)
+# -------------------------
+# Static / Uploads
+# -------------------------
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
+
+# -------------------------
+# Routers
+# -------------------------
 
 app.include_router(auth.router)
 app.include_router(users.router)
@@ -111,6 +90,10 @@ app.include_router(posts.router)
 app.include_router(comments.router)
 app.include_router(images.router)
 
+
+# -------------------------
+# Health
+# -------------------------
 
 @app.get("/")
 async def root():
@@ -122,6 +105,10 @@ async def health_check():
     return {"status": "healthy"}
 
 
+# -------------------------
+# Middleware
+# -------------------------
+
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     logger.info("Request: %s %s", request.method, request.url.path)
@@ -129,6 +116,10 @@ async def log_requests(request: Request, call_next):
     logger.info("Response: %s", response.status_code)
     return response
 
+
+# -------------------------
+# Exception Handlers
+# -------------------------
 
 @app.exception_handler(BusinessException)
 async def handle_business_exception(_: Request, exc: BusinessException):

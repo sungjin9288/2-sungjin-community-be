@@ -3,9 +3,13 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
-from app.database import SessionLocal
-from app.db_models import Comment, Like, Post, PostTag, Session, Tag, User
+from app.database import SessionLocal, engine
+from app.db_models import Base, Comment, Like, Post, PostTag, Session, Tag, User
 from app.main import app
+
+# 테스트용 DB 테이블 생성 (SQLite in-memory 또는 파일 DB)
+Base.metadata.create_all(bind=engine)
+
 
 
 @pytest.fixture

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from sqlalchemy.exc import IntegrityError
@@ -24,7 +24,7 @@ def _to_dict(obj):
 def find_user_by_email(email: str) -> dict | None:
     db = SessionLocal()
     try:
-        user = db.query(User).filter(User.email == email).first()
+        user = db.query(User).filter(User.email == email, User.deleted_at.is_(None)).first()
         return _to_dict(user)
     finally:
         db.close()
@@ -33,7 +33,7 @@ def find_user_by_email(email: str) -> dict | None:
 def get_user_by_id(user_id: int) -> dict | None:
     db = SessionLocal()
     try:
-        user = db.query(User).filter(User.id == user_id).first()
+        user = db.query(User).filter(User.id == user_id, User.deleted_at.is_(None)).first()
         return _to_dict(user)
     finally:
         db.close()
@@ -46,7 +46,7 @@ def is_email_exists(email: str) -> bool:
 def is_nickname_exists(nickname: str) -> bool:
     db = SessionLocal()
     try:
-        exists = db.query(User.id).filter(User.nickname == nickname).first()
+        exists = db.query(User.id).filter(User.nickname == nickname, User.deleted_at.is_(None)).first()
         return exists is not None
     finally:
         db.close()
@@ -113,7 +113,7 @@ def create_session(user_id: int, ttl_days: int = SESSION_TTL_DAYS) -> str:
     db = SessionLocal()
     try:
         session_id = str(uuid4())
-        expires_at = datetime.utcnow() + timedelta(days=ttl_days)
+        expires_at = datetime.now(timezone.utc) + timedelta(days=ttl_days)
         db.add(Session(session_id=session_id, user_id=user_id, expires_at=expires_at))
         db.commit()
         return session_id
@@ -124,12 +124,17 @@ def create_session(user_id: int, ttl_days: int = SESSION_TTL_DAYS) -> str:
 def get_user_id_by_session(session_id: str) -> int | None:
     db = SessionLocal()
     try:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         session = db.query(Session).filter(Session.session_id == session_id).first()
         if not session:
             return None
 
-        if session.expires_at <= now:
+        # SQLite는 timezone-naive datetime을 저장하므로 비교 전 aware로 변환
+        expires_at = session.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+        if expires_at <= now:
             db.delete(session)
             db.commit()
             return None
@@ -137,6 +142,7 @@ def get_user_id_by_session(session_id: str) -> int | None:
         return session.user_id
     finally:
         db.close()
+
 
 
 def delete_session(session_id: str) -> None:
