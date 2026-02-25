@@ -1,0 +1,56 @@
+name: Deploy Backend Image To Lambda
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to build and deploy"
+        required: true
+        type: string
+      aws_region:
+        description: "AWS Region"
+        required: true
+        default: "ap-northeast-2"
+        type: string
+      ecr_repository:
+        description: "ECR repository name"
+        required: true
+        default: "community-backend-lambda"
+        type: string
+      lambda_function_name:
+        description: "Lambda function name"
+        required: true
+        default: "community-backend-lambda"
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ github.event.inputs.aws_region }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Deploy Lambda image
+        shell: bash
+        env:
+          AWS_REGION: ${{ github.event.inputs.aws_region }}
+          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+          ECR_REPOSITORY: ${{ github.event.inputs.ecr_repository }}
+          LAMBDA_FUNCTION_NAME: ${{ github.event.inputs.lambda_function_name }}
+          IMAGE_TAG: ${{ github.event.inputs.image_tag }}
+          LAMBDA_ROLE_ARN: ${{ secrets.LAMBDA_EXEC_ROLE_ARN }}
+        run: |
+          set -euo pipefail
+          chmod +x ./scripts/deploy-lambda-image.sh
+          ./scripts/deploy-lambda-image.sh "$AWS_REGION" "$AWS_ACCOUNT_ID" "$ECR_REPOSITORY" "$LAMBDA_FUNCTION_NAME" "$IMAGE_TAG" "$LAMBDA_ROLE_ARN"

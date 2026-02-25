@@ -1,0 +1,13 @@
+FROM public.ecr.aws/lambda/python:3.12
+
+WORKDIR /var/task
+
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir mangum
+
+COPY app ./app
+COPY migrations ./migrations
+COPY alembic.ini ./alembic.ini
+
+CMD ["app.lambda_handler.handler"]

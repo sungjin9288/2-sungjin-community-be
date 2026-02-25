@@ -1,6 +1,6 @@
-fastapi      
-uvicorn[standard] 
-pydantic      
+fastapi
+uvicorn[standard]
+pydantic
 python-multipart
 bcrypt
 passlib
@@ -11,5 +11,5 @@ email-validator
 alembic
 PyJWT
 psycopg2-binary
-psycopg2-binary
 loguru
+mangum

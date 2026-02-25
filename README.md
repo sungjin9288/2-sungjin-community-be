@@ -218,6 +218,17 @@ terraform state list | sort
 ```
 
 ---
+### 추가 구현 파일 (Miniquest 6/8)
+
+- Lambda 컨테이너 진입점: `app/lambda_handler.py`
+- Lambda 컨테이너 Dockerfile: `Dockerfile.lambda`
+- Lambda 이미지 배포 스크립트: `scripts/deploy-lambda-image.sh`
+- ECS Fargate CD 워크플로우: `.github/workflows/deploy-ecs-fargate.yml`
+- Lambda Image CD 워크플로우: `.github/workflows/deploy-lambda-image.yml`
+- Backend CI 워크플로우: `.github/workflows/ci-backend.yml`
+
+---
+
 
 ## 📖 API 문서
 
