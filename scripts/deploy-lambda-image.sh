@@ -39,12 +39,18 @@ echo "[2/5] Login to ECR"
 aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY" >/dev/null
 
 echo "[3/5] Build and push Lambda image: ${IMAGE_URI}"
+# Lambda rejects OCI index/attestation manifests from buildx --push.
+# Build a single linux/amd64 image locally, then push Docker schema v2 manifest.
 docker buildx build \
   --platform linux/amd64 \
+  --provenance=false \
+  --sbom=false \
   --file "$PROJECT_ROOT/Dockerfile.lambda" \
   --tag "$IMAGE_URI" \
-  --push \
+  --load \
   "$PROJECT_ROOT"
+
+docker push "$IMAGE_URI"
 
 echo "[4/5] Create or update Lambda function: ${LAMBDA_FUNCTION_NAME}"
 if aws lambda get-function --region "$AWS_REGION" --function-name "$LAMBDA_FUNCTION_NAME" >/dev/null 2>&1; then
