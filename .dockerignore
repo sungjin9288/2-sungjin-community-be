@@ -1,0 +1,17 @@
+.git
+.github
+.gitignore
+.env
+.env.*
+.venv/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+*.sqlite3
+community.db
+debug.log
+uploads/
+tests/
+README.md
+RUN.md
+*.md
