@@ -1,4 +1,5 @@
 import logging
+import os
 import sys
 from types import FrameType
 from typing import cast
@@ -36,10 +37,14 @@ def setup_logging() -> None:
         logging.getLogger(name).handlers = []
         logging.getLogger(name).propagate = True
 
-    # configure loguru
-    logger.configure(
-        handlers=[
-            {"sink": sys.stdout, "serialize": False},
-            {"sink": "debug.log", "serialize": False, "encoding": "utf-8"},
-        ]
-    )
+    log_file_path = os.getenv("APP_LOG_FILE", "debug.log").strip()
+
+    handlers = [{"sink": sys.stdout, "serialize": False}]
+    if log_file_path:
+        handlers.append({"sink": log_file_path, "serialize": False, "encoding": "utf-8"})
+
+    try:
+        logger.configure(handlers=handlers)
+    except OSError:
+        # Fall back to stdout-only logging when file sink is not writable.
+        logger.configure(handlers=[{"sink": sys.stdout, "serialize": False}])

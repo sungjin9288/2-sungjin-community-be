@@ -21,9 +21,17 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install pytest
 
       - name: Syntax check
         run: python -m compileall app
 
       - name: App import smoke test
+        env:
+          APP_LOG_FILE: /tmp/community-backend-import.log
         run: python -c "from app.main import app; print(app.title)"
+
+      - name: Run pytest
+        env:
+          APP_LOG_FILE: /tmp/community-backend-test.log
+        run: pytest -q
