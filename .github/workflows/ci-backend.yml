@@ -34,4 +34,4 @@ jobs:
       - name: Run pytest
         env:
           APP_LOG_FILE: /tmp/community-backend-test.log
-        run: pytest -q
+        run: python -m pytest -q
