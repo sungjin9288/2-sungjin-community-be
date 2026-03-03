@@ -1,0 +1,41 @@
+name: Deploy Backend Blue Green To EC2
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Docker image tag to deploy"
+        required: true
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare SSH key
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > ec2_key.pem <<'KEY'
+          ${{ secrets.BE_BLUEGREEN_EC2_SSH_PRIVATE_KEY }}
+          KEY
+          chmod 600 ec2_key.pem
+
+      - name: Deploy BE blue/green
+        shell: bash
+        env:
+          EC2_HOST: ${{ secrets.BE_BLUEGREEN_EC2_HOST }}
+          EC2_USER: ${{ secrets.BE_BLUEGREEN_EC2_USER }}
+          DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USER }}
+          DATABASE_URL: ${{ secrets.BE_BLUEGREEN_DATABASE_URL }}
+          CORS_ALLOW_ORIGINS: ${{ secrets.BE_BLUEGREEN_CORS_ALLOW_ORIGINS }}
+          IMAGE_TAG: ${{ github.event.inputs.image_tag }}
+        run: |
+          set -euo pipefail
+          chmod +x ./scripts/ec2-bluegreen-be-deploy.sh
+          DATABASE_URL="$DATABASE_URL" CORS_ALLOW_ORIGINS="$CORS_ALLOW_ORIGINS" \
+            ./scripts/ec2-bluegreen-be-deploy.sh "$EC2_HOST" "$EC2_USER" "$DOCKERHUB_USER" "$IMAGE_TAG" ./ec2_key.pem

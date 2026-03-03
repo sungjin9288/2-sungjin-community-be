@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect, text
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -102,7 +103,17 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy"}
+    """BE-M4: DB 연결을 검증하여 ALB Health Check가 DB 장애를 감지하도록 함."""
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return {"status": "healthy", "db": "ok"}
+    except Exception as e:
+        logger.error("Health check DB connection failed: %s", e)
+        return JSONResponse(
+            content={"status": "unhealthy", "db": "error"},
+            status_code=503,
+        )
 
 
 # -------------------------

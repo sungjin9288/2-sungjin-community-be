@@ -1,26 +1,18 @@
 from datetime import datetime, timedelta, timezone
 import logging
 
-from sqlalchemy import case, desc, func
+from sqlalchemy import case, desc, func, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 
 from app.database import SessionLocal
 from app.db_models import Comment, Like, Post, PostTag, Tag
+from app.models.base import to_dict as _to_dict
 
 logger = logging.getLogger(__name__)
 
 
-def _to_dict(obj):
-    if not obj:
-        return None
-    data = {}
-    for c in obj.__table__.columns:
-        val = getattr(obj, c.name)
-        if isinstance(val, datetime):
-            val = val.isoformat()
-        data[c.name] = val
-    return data
+
 
 
 def _build_likes_map(db, post_ids: list[int]) -> dict[int, int]:
@@ -246,7 +238,8 @@ def update_post(
 ) -> dict | None:
     db = SessionLocal()
     try:
-        post = db.query(Post).filter(Post.id == post_id).first()
+        # BE-H4: 처음부터 joinedload로 조회하여 커밋 후 재쿼리 방지
+        post = db.query(Post).options(joinedload(Post.owner)).filter(Post.id == post_id).first()
         if not post:
             return None
 
@@ -259,9 +252,7 @@ def update_post(
 
         db.commit()
         db.refresh(post)
-
-        hydrated = db.query(Post).options(joinedload(Post.owner)).filter(Post.id == post_id).first()
-        return _serialize_posts_batch(db, [hydrated], current_user_id=None)[0]
+        return _serialize_posts_batch(db, [post], current_user_id=None)[0]
     except Exception:
         db.rollback()
         raise
@@ -270,12 +261,15 @@ def update_post(
 
 
 def delete_post(post_id: int) -> None:
+    """BE-H3: Hard Delete → Soft Delete. deleted_at 컬럼 활용."""
     db = SessionLocal()
     try:
-        post = db.query(Post).filter(Post.id == post_id).first()
-        if post:
-            db.delete(post)
-            db.commit()
+        db.execute(
+            update(Post)
+            .where(Post.id == post_id)
+            .values(deleted_at=datetime.now(timezone.utc))
+        )
+        db.commit()
     except Exception:
         db.rollback()
         raise
@@ -284,12 +278,18 @@ def delete_post(post_id: int) -> None:
 
 
 def increment_views(post_id: int) -> None:
+    """BE-H2: Read→Modify→Write 경쟁 조건 제거. 단일 원자적 UPDATE로 처리."""
     db = SessionLocal()
     try:
-        post = db.query(Post).filter(Post.id == post_id).first()
-        if post:
-            post.view_count += 1
-            db.commit()
+        db.execute(
+            update(Post)
+            .where(Post.id == post_id)
+            .values(view_count=Post.view_count + 1)
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 

@@ -1,4 +1,5 @@
 import os
+import re
 
 from app.common.exceptions import (
     EmailAlreadyExistsError,
@@ -13,15 +14,21 @@ from app.common.security import hash_password, verify_password
 from app.models import users_model
 
 REFRESH_TOKEN_TTL_DAYS = int(os.getenv("REFRESH_TOKEN_TTL_DAYS", "14"))
+PASSWORD_PATTERN = re.compile(
+    r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*#?&])[A-Za-z\d@$!%*#?&]{8,20}$"
+)
 
 
 def signup(email: str, password: str, nickname: str) -> dict:
+    """BE-L1: 비밀번호 검증을 users_controller 수준으로 강화 (단순 길이 체크 → regex 패턴 검증)."""
     if users_model.is_email_exists(email):
         raise EmailAlreadyExistsError()
     if users_model.is_nickname_exists(nickname):
         raise NicknameAlreadyExistsError()
-    if len(password) < 8:
-        raise InvalidPasswordError("비밀번호는 8자 이상이어야 합니다.")
+    if len(password) < 8 or len(password) > 20:
+        raise InvalidPasswordError("비밀번호는 8자 이상, 20자 이하여야 합니다.")
+    if not PASSWORD_PATTERN.match(password):
+        raise InvalidPasswordError("비밀번호는 대문자, 소문자, 숫자, 특수문자를 각각 최소 1개 포함해야 합니다.")
 
     user = users_model.create_user(
         email=email,

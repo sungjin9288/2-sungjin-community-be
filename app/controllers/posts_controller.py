@@ -50,8 +50,6 @@ def _normalize_tags(tags: list[str]) -> list[str]:
         seen.add(normalized)
         deduped.append(normalized)
 
-    if len(deduped) > 5:
-        raise InvalidRequestFormatError("태그는 최대 5개까지 등록할 수 있습니다.")
     return deduped
 
 
@@ -99,9 +97,11 @@ def get_post(post_id: int, current_user_id: int | None = None) -> JSONResponse:
     if not post:
         raise PostNotFoundError()
 
+    # BE-M3: increment 후 find_post를 다시 호출하지 않고,
+    # view_count를 응답에서 +1 보정하여 빠른 피드백 제공
     posts_model.increment_views(post_id)
-    post["views"] = post.get("views", 0) + 1
-    post["view_count"] = post.get("views")
+    post["views"] = post.get("view_count", 0) + 1
+    post["view_count"] = post["views"]
     return ok(message="read_detail_success", data=post)
 
 

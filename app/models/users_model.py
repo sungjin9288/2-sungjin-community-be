@@ -1,24 +1,15 @@
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 
 from app.database import SessionLocal
 from app.db_models import Session, User
+from app.models.base import to_dict as _to_dict
 
 SESSION_TTL_DAYS = 7
 
-
-def _to_dict(obj):
-    if not obj:
-        return None
-    data = {}
-    for c in obj.__table__.columns:
-        val = getattr(obj, c.name)
-        if isinstance(val, datetime):
-            val = val.isoformat()
-        data[c.name] = val
-    return data
 
 
 def find_user_by_email(email: str) -> dict | None:
@@ -99,12 +90,18 @@ def update_user(user_id: int, **kwargs) -> dict | None:
 
 
 def delete_user(user_id: int) -> None:
+    """BE-L2: Hard Delete → Soft Delete. deleted_at 커럼 활용."""
     db = SessionLocal()
     try:
-        user = db.query(User).filter(User.id == user_id).first()
-        if user:
-            db.delete(user)
-            db.commit()
+        db.execute(
+            update(User)
+            .where(User.id == user_id)
+            .values(deleted_at=datetime.now(timezone.utc))
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 

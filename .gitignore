@@ -48,3 +48,6 @@ uploads/*
 !uploads/.gitkeep
 !uploads/profile/.gitkeep
 !uploads/post/.gitkeep
+
+# Local virtualenv
+.venv312/
