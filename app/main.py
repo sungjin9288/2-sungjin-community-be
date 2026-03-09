@@ -19,6 +19,16 @@ from app.database import engine
 from app.routes import auth, comments, images, posts, users
 
 
+def ensure_runtime_directories() -> None:
+    uploads_dir = Path("uploads")
+    uploads_dir.mkdir(exist_ok=True)
+    (uploads_dir / "profile").mkdir(exist_ok=True)
+    (uploads_dir / "post").mkdir(exist_ok=True)
+
+    static_dir = Path("static")
+    static_dir.mkdir(exist_ok=True)
+
+
 # -------------------------
 # Logging
 # -------------------------
@@ -35,16 +45,8 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     # Startup: logging is already setup
     logger.info("Application starting up...")
-    
-    # Ensure upload directories exist
-    uploads_dir = Path("uploads")
-    uploads_dir.mkdir(exist_ok=True)
-    (uploads_dir / "profile").mkdir(exist_ok=True)
-    (uploads_dir / "post").mkdir(exist_ok=True)
+    ensure_runtime_directories()
 
-    static_dir = Path("static")
-    static_dir.mkdir(exist_ok=True)
-    
     yield
     
     # Shutdown
@@ -77,6 +79,7 @@ app.add_middleware(
 # Static / Uploads
 # -------------------------
 
+ensure_runtime_directories()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
