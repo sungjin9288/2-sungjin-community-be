@@ -9,6 +9,7 @@ router = APIRouter(prefix="/posts/{post_id}/comments", tags=["comments"])
 
 class CommentRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=500, description="댓글 내용")
+    parent_comment_id: int | None = Field(default=None, ge=1)
 
 
 @router.get("")
@@ -22,7 +23,11 @@ def list_comments(
 @router.post("")
 def create_comment(post_id: int, payload: CommentRequest, request: Request):
     user_id = require_user_id(request)
-    return comments_controller.create_comment(user_id, post_id, {"content": payload.content})
+    return comments_controller.create_comment(
+        user_id,
+        post_id,
+        {"content": payload.content, "parent_comment_id": payload.parent_comment_id},
+    )
 
 
 @router.put("/{comment_id}")

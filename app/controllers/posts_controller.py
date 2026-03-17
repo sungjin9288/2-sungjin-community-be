@@ -12,7 +12,7 @@ from app.common.exceptions import (
     PostNotFoundError,
 )
 from app.common.responses import created, ok
-from app.models import posts_model
+from app.models import notifications_model, posts_model
 
 ALLOWED_SORTS = {"latest", "hot", "discussed"}
 TAG_PATTERN = re.compile(r"^[0-9A-Za-z가-힣_-]+$")
@@ -51,6 +51,21 @@ def _normalize_tags(tags: list[str]) -> list[str]:
         deduped.append(normalized)
 
     return deduped
+
+
+def _notify_post_like(actor_id: int, post: dict) -> None:
+    if not post or not post.get("user_id") or post["user_id"] == actor_id:
+        return
+    notifications_model.create_notification(
+        post["user_id"],
+        actor_id=actor_id,
+        notification_type="post_like",
+        title="게시글에 새로운 좋아요가 달렸습니다.",
+        body=post.get("title"),
+        link_url=f"/posts/{post['id']}",
+        entity_type="post",
+        entity_id=post["id"],
+    )
 
 
 def list_posts(
@@ -92,13 +107,18 @@ def create_post(
     return created(message="post_created", data=post)
 
 
+def list_bookmarked_posts(user_id: int, page: int = 1, limit: int = 10) -> JSONResponse:
+    if page < 1 or not (1 <= limit <= 50):
+        raise InvalidPagingParamsError()
+    data = posts_model.list_bookmarked_posts(user_id=user_id, page=page, limit=limit)
+    return ok(message="read_bookmarked_posts_success", data=data)
+
+
 def get_post(post_id: int, current_user_id: int | None = None) -> JSONResponse:
     post = posts_model.find_post(post_id, current_user_id)
     if not post:
         raise PostNotFoundError()
 
-    # BE-M3: increment 후 find_post를 다시 호출하지 않고,
-    # view_count를 응답에서 +1 보정하여 빠른 피드백 제공
     posts_model.increment_views(post_id)
     post["views"] = post.get("view_count", 0) + 1
     post["view_count"] = post["views"]
@@ -145,7 +165,8 @@ def delete_post(user_id: int, post_id: int) -> JSONResponse:
 
 
 def like_post(user_id: int, post_id: int) -> JSONResponse:
-    if not posts_model.find_post(post_id):
+    post = posts_model.find_post(post_id, user_id)
+    if not post:
         raise PostNotFoundError()
 
     if posts_model.is_liked(user_id, post_id):
@@ -154,6 +175,8 @@ def like_post(user_id: int, post_id: int) -> JSONResponse:
     created_like = posts_model.add_like(user_id, post_id)
     if not created_like:
         raise BusinessException(ErrorCode.INVALID_REQUEST_FORMAT, "이미 좋아요를 눌렀습니다.")
+
+    _notify_post_like(user_id, post)
     return created(
         message="like_created",
         data={"likes_count": posts_model.get_like_count(post_id)},
@@ -161,7 +184,7 @@ def like_post(user_id: int, post_id: int) -> JSONResponse:
 
 
 def unlike_post(user_id: int, post_id: int) -> JSONResponse:
-    if not posts_model.find_post(post_id):
+    if not posts_model.find_post(post_id, user_id):
         raise PostNotFoundError()
 
     posts_model.remove_like(user_id, post_id)
@@ -169,6 +192,24 @@ def unlike_post(user_id: int, post_id: int) -> JSONResponse:
         message="like_deleted",
         data={"likes_count": posts_model.get_like_count(post_id)},
     )
+
+
+def bookmark_post(user_id: int, post_id: int) -> JSONResponse:
+    if not posts_model.find_post(post_id, user_id):
+        raise PostNotFoundError()
+    if posts_model.is_bookmarked(user_id, post_id):
+        raise BusinessException(ErrorCode.INVALID_REQUEST_FORMAT, "이미 북마크한 게시글입니다.")
+    created_bookmark = posts_model.add_bookmark(user_id, post_id)
+    if not created_bookmark:
+        raise BusinessException(ErrorCode.INVALID_REQUEST_FORMAT, "이미 북마크한 게시글입니다.")
+    return created(message="bookmark_created", data={"post_id": post_id})
+
+
+def unbookmark_post(user_id: int, post_id: int) -> JSONResponse:
+    if not posts_model.find_post(post_id, user_id):
+        raise PostNotFoundError()
+    posts_model.remove_bookmark(user_id, post_id)
+    return ok(message="bookmark_deleted", data={"post_id": post_id})
 
 
 def get_trending(

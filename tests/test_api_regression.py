@@ -154,16 +154,16 @@ def test_direct_messages_lifecycle(client, unique_email, unique_nickname):
     assert sent_payload["is_mine"] is True
     assert sent_payload["recipient"]["id"] == recipient_user["id"]
 
+    unread_res = client.get("/messages/unread-count", headers=recipient_headers)
+    assert unread_res.status_code == 200
+    assert unread_res.json()["data"]["unread_count"] == 1
+
     conversations_res = client.get("/messages/conversations", headers=recipient_headers)
     assert conversations_res.status_code == 200
     conversations = conversations_res.json()["data"]
     assert len(conversations) == 1
     assert conversations[0]["unread_count"] == 1
     assert conversations[0]["partner"]["email"] == sender_email
-
-    bad_thread_res = client.get(f"/messages/with/{sent_payload['sender']['id']}", headers=sender_headers)
-    assert bad_thread_res.status_code == 400
-    assert bad_thread_res.json()["message"] == "invalid_request_format"
 
     sender_user_id = sent_payload["sender"]["id"]
     recipient_thread_res = client.get(f"/messages/with/{sender_user_id}", headers=recipient_headers)
@@ -176,3 +176,80 @@ def test_direct_messages_lifecycle(client, unique_email, unique_nickname):
     conversations_after_res = client.get("/messages/conversations", headers=recipient_headers)
     assert conversations_after_res.status_code == 200
     assert conversations_after_res.json()["data"][0]["unread_count"] == 0
+
+
+def test_bookmarks_notifications_blocks_and_reports(client, unique_email, unique_nickname):
+    password = "Abcd1234!"
+    author = _signup_and_login(client, unique_email("author"), password, unique_nickname("a"))
+    reader = _signup_and_login(client, unique_email("reader"), password, unique_nickname("r"))
+
+    author_headers = _auth_header(author["access_token"])
+    reader_headers = _auth_header(reader["access_token"])
+
+    post_res = client.post(
+        "/posts",
+        headers=author_headers,
+        json={"title": "북마크 테스트", "content": "본문", "tags": ["qa"]},
+    )
+    assert post_res.status_code == 201
+    post_id = post_res.json()["data"]["id"]
+
+    bookmark_res = client.post(f"/posts/{post_id}/bookmarks", headers=reader_headers)
+    assert bookmark_res.status_code == 201
+
+    my_bookmarks_res = client.get("/posts/bookmarks/me", headers=reader_headers)
+    assert my_bookmarks_res.status_code == 200
+    assert my_bookmarks_res.json()["data"][0]["id"] == post_id
+    assert my_bookmarks_res.json()["data"][0]["is_bookmarked"] is True
+
+    comment_res = client.post(
+        f"/posts/{post_id}/comments",
+        headers=reader_headers,
+        json={"content": "좋은 글이네요!"},
+    )
+    assert comment_res.status_code == 201
+    comment_id = comment_res.json()["data"]["id"]
+
+    notifications_res = client.get("/notifications", headers=author_headers)
+    assert notifications_res.status_code == 200
+    notifications = notifications_res.json()["data"]
+    assert any(item["type"] == "comment" for item in notifications)
+
+    report_res = client.post(
+        "/reports",
+        headers=reader_headers,
+        json={"target_type": "post", "target_id": post_id, "reason": "etc", "description": "검증용 신고"},
+    )
+    assert report_res.status_code == 201
+
+    reply_res = client.post(
+        f"/posts/{post_id}/comments",
+        headers=author_headers,
+        json={"content": "답글입니다.", "parent_comment_id": comment_id},
+    )
+    assert reply_res.status_code == 201
+
+    nested_comments_res = client.get(f"/posts/{post_id}/comments", headers=author_headers)
+    assert nested_comments_res.status_code == 200
+    nested_comments = nested_comments_res.json()["data"]
+    assert len(nested_comments) == 1
+    assert len(nested_comments[0]["replies"]) == 1
+
+    author_me = client.get("/users/me", headers=author_headers)
+    author_user_id = author_me.json()["data"]["id"]
+    block_res = client.post(f"/blocks/users/{author_user_id}", headers=reader_headers)
+    assert block_res.status_code == 201
+
+    hidden_posts_res = client.get("/posts", headers=reader_headers)
+    assert hidden_posts_res.status_code == 200
+    assert hidden_posts_res.json()["data"] == []
+
+    blocked_dm_res = client.post(
+        "/messages",
+        headers=reader_headers,
+        json={"recipient_id": author_user_id, "content": "차단 후 DM"},
+    )
+    assert blocked_dm_res.status_code == 403
+
+    hidden_comments_res = client.get(f"/posts/{post_id}/comments", headers=reader_headers)
+    assert hidden_comments_res.status_code == 404

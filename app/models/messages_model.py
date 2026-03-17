@@ -6,6 +6,7 @@ from sqlalchemy.orm import joinedload
 from app.database import SessionLocal
 from app.db_models import DirectMessage, User
 from app.models.base import to_dict as _to_dict
+from app.models.social_model import get_hidden_user_ids
 
 SEARCH_LIMIT = 20
 MESSAGE_LIMIT = 100
@@ -32,6 +33,9 @@ def search_users(user_id: int, query: str | None = None) -> list[dict]:
     db = SessionLocal()
     try:
         users_query = db.query(User).filter(User.deleted_at.is_(None), User.id != user_id)
+        hidden_user_ids = get_hidden_user_ids(user_id)
+        if hidden_user_ids:
+            users_query = users_query.filter(User.id.notin_(hidden_user_ids))
         normalized_query = (query or "").strip()
         if normalized_query:
             keyword = f"%{normalized_query}%"
@@ -45,9 +49,10 @@ def search_users(user_id: int, query: str | None = None) -> list[dict]:
         db.close()
 
 
-def list_conversations(user_id: int) -> list[dict]:
+def list_conversations(user_id: int, query: str | None = None) -> list[dict]:
     db = SessionLocal()
     try:
+        hidden_user_ids = get_hidden_user_ids(user_id)
         messages = (
             db.query(DirectMessage)
             .options(joinedload(DirectMessage.sender), joinedload(DirectMessage.recipient))
@@ -61,15 +66,22 @@ def list_conversations(user_id: int) -> list[dict]:
 
         conversation_map: OrderedDict[int, dict] = OrderedDict()
         unread_counts: dict[int, int] = {}
+        normalized_query = (query or "").strip().lower()
 
         for message in messages:
             partner = message.recipient if message.sender_id == user_id else message.sender
+            if not partner or partner.deleted_at is not None or partner.id in hidden_user_ids:
+                continue
+
             partner_id = partner.id
             unread_counts.setdefault(partner_id, 0)
             if message.recipient_id == user_id and not message.is_read:
                 unread_counts[partner_id] += 1
 
             if partner_id in conversation_map:
+                continue
+
+            if normalized_query and normalized_query not in partner.nickname.lower() and normalized_query not in partner.email.lower() and normalized_query not in (message.content or "").lower():
                 continue
 
             conversation_map[partner_id] = {
@@ -127,6 +139,22 @@ def list_messages(user_id: int, other_user_id: int) -> list[dict]:
                 db.refresh(message)
 
         return [_serialize_message(message, user_id) for message in messages]
+    finally:
+        db.close()
+
+
+def count_unread_messages(user_id: int) -> int:
+    db = SessionLocal()
+    try:
+        hidden_user_ids = get_hidden_user_ids(user_id)
+        query = db.query(DirectMessage).filter(
+            DirectMessage.recipient_id == user_id,
+            DirectMessage.deleted_at.is_(None),
+            DirectMessage.is_read.is_(False),
+        )
+        if hidden_user_ids:
+            query = query.filter(DirectMessage.sender_id.notin_(hidden_user_ids))
+        return query.count()
     finally:
         db.close()
 

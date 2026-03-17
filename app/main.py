@@ -8,7 +8,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import db_models
@@ -16,7 +16,7 @@ from app.common.exceptions import BusinessException
 from app.common.responses import fail
 from app.core.logger import setup_logging
 from app.database import engine
-from app.routes import auth, comments, images, messages, posts, users
+from app.routes import auth, comments, images, messages, notifications, posts, social, users
 
 
 def ensure_runtime_directories() -> None:
@@ -29,6 +29,18 @@ def ensure_runtime_directories() -> None:
     static_dir.mkdir(exist_ok=True)
 
 
+def ensure_additive_schema() -> None:
+    inspector = inspect(engine)
+    try:
+        comment_columns = {column["name"] for column in inspector.get_columns("comments")}
+    except Exception:
+        comment_columns = set()
+
+    if comment_columns and "parent_comment_id" not in comment_columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE comments ADD COLUMN parent_comment_id INTEGER"))
+
+
 setup_logging()
 logger = logging.getLogger(__name__)
 
@@ -38,11 +50,12 @@ async def lifespan(app: FastAPI):
     logger.info("Application starting up...")
     ensure_runtime_directories()
     db_models.Base.metadata.create_all(bind=engine)
+    ensure_additive_schema()
     yield
     logger.info("Application shutting down...")
 
 
-app = FastAPI(title="Community API", version="1.2.0", lifespan=lifespan)
+app = FastAPI(title="Community API", version="1.3.0", lifespan=lifespan)
 
 
 default_origins = "http://localhost:3001,http://127.0.0.1:3001"
@@ -70,6 +83,8 @@ app.include_router(posts.router)
 app.include_router(comments.router)
 app.include_router(images.router)
 app.include_router(messages.router)
+app.include_router(notifications.router)
+app.include_router(social.router)
 
 
 @app.get("/")

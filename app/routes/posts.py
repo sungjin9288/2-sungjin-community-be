@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field
 
-from app.common.deps import get_current_user_id_optional, require_user_id
+from app.common.deps import get_current_user_id, get_current_user_id_optional, require_user_id
 from app.controllers import posts_controller
 
 router = APIRouter(prefix="/posts", tags=["posts"])
@@ -39,6 +39,15 @@ def get_trending(
     user_id: int | None = Depends(get_current_user_id_optional),
 ):
     return posts_controller.get_trending(days=days, limit=limit, current_user_id=user_id)
+
+
+@router.get("/bookmarks/me")
+def get_my_bookmarked_posts(
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=50),
+    user_id: int = Depends(get_current_user_id),
+):
+    return posts_controller.list_bookmarked_posts(user_id=user_id, page=page, limit=limit)
 
 
 @router.post("")
@@ -87,3 +96,15 @@ def like_post(post_id: int, request: Request):
 def unlike_post(post_id: int, request: Request):
     user_id = require_user_id(request)
     return posts_controller.unlike_post(user_id, post_id)
+
+
+@router.post("/{post_id}/bookmarks")
+def bookmark_post(post_id: int, request: Request):
+    user_id = require_user_id(request)
+    return posts_controller.bookmark_post(user_id, post_id)
+
+
+@router.delete("/{post_id}/bookmarks")
+def unbookmark_post(post_id: int, request: Request):
+    user_id = require_user_id(request)
+    return posts_controller.unbookmark_post(user_id, post_id)

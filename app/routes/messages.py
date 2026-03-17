@@ -21,8 +21,16 @@ def search_users(
 
 
 @router.get("/conversations")
-def list_conversations(user_id: int = Depends(get_current_user_id)):
-    return messages_controller.list_conversations(user_id=user_id)
+def list_conversations(
+    query: str | None = Query(None, description="대화 상대/마지막 메시지 검색"),
+    user_id: int = Depends(get_current_user_id),
+):
+    return messages_controller.list_conversations(user_id=user_id, query=query)
+
+
+@router.get("/unread-count")
+def unread_count(user_id: int = Depends(get_current_user_id)):
+    return messages_controller.unread_count(user_id=user_id)
 
 
 @router.get("/with/{other_user_id}")

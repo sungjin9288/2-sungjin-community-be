@@ -6,13 +6,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 
 from app.database import SessionLocal
-from app.db_models import Comment, Like, Post, PostTag, Tag
+from app.db_models import Comment, Like, Post, PostBookmark, PostTag, Tag
 from app.models.base import to_dict as _to_dict
+from app.models.social_model import get_hidden_user_ids
 
 logger = logging.getLogger(__name__)
-
-
-
 
 
 def _build_likes_map(db, post_ids: list[int]) -> dict[int, int]:
@@ -32,7 +30,7 @@ def _build_comments_map(db, post_ids: list[int]) -> dict[int, int]:
         return {}
     rows = (
         db.query(Comment.post_id, func.count(Comment.id))
-        .filter(Comment.post_id.in_(post_ids))
+        .filter(Comment.post_id.in_(post_ids), Comment.deleted_at.is_(None))
         .group_by(Comment.post_id)
         .all()
     )
@@ -66,6 +64,17 @@ def _build_liked_set(db, post_ids: list[int], current_user_id: int | None) -> se
     return {post_id for (post_id,) in rows}
 
 
+def _build_bookmarked_set(db, post_ids: list[int], current_user_id: int | None) -> set[int]:
+    if not post_ids or not current_user_id:
+        return set()
+    rows = (
+        db.query(PostBookmark.post_id)
+        .filter(PostBookmark.user_id == current_user_id, PostBookmark.post_id.in_(post_ids))
+        .all()
+    )
+    return {post_id for (post_id,) in rows}
+
+
 def _serialize_post(
     post: Post,
     likes_count: int,
@@ -73,6 +82,7 @@ def _serialize_post(
     tags: list[str],
     current_user_id: int | None,
     liked_post_ids: set[int],
+    bookmarked_post_ids: set[int],
 ) -> dict:
     data = _to_dict(post)
     data["author_nickname"] = post.owner.nickname if post.owner else "Unknown"
@@ -84,6 +94,7 @@ def _serialize_post(
     data["tags"] = tags
     data["is_author"] = bool(current_user_id and post.user_id == current_user_id)
     data["is_liked"] = post.id in liked_post_ids
+    data["is_bookmarked"] = post.id in bookmarked_post_ids
     return data
 
 
@@ -93,6 +104,7 @@ def _serialize_posts_batch(db, posts: list[Post], current_user_id: int | None) -
     comments_map = _build_comments_map(db, post_ids)
     tags_map = _build_tags_map(db, post_ids)
     liked_set = _build_liked_set(db, post_ids, current_user_id)
+    bookmarked_set = _build_bookmarked_set(db, post_ids, current_user_id)
 
     return [
         _serialize_post(
@@ -102,6 +114,7 @@ def _serialize_posts_batch(db, posts: list[Post], current_user_id: int | None) -
             tags=tags_map.get(p.id, []),
             current_user_id=current_user_id,
             liked_post_ids=liked_set,
+            bookmarked_post_ids=bookmarked_set,
         )
         for p in posts
     ]
@@ -125,11 +138,16 @@ def list_posts(
         )
         comments_subq = (
             db.query(Comment.post_id.label("post_id"), func.count(Comment.id).label("comments_count"))
+            .filter(Comment.deleted_at.is_(None))
             .group_by(Comment.post_id)
             .subquery()
         )
 
         query = db.query(Post).options(joinedload(Post.owner)).filter(Post.deleted_at.is_(None))
+        hidden_user_ids = get_hidden_user_ids(current_user_id)
+        if hidden_user_ids:
+            query = query.filter(Post.user_id.notin_(hidden_user_ids))
+
         if tag:
             query = (
                 query.join(PostTag, PostTag.post_id == Post.id)
@@ -159,8 +177,8 @@ def list_posts(
 
         posts = query.offset(offset).limit(limit).all()
         return _serialize_posts_batch(db, posts, current_user_id)
-    except Exception as e:
-        logger.error("failed to list posts: %s", e)
+    except Exception as exc:
+        logger.error("failed to list posts: %s", exc)
         raise
     finally:
         db.close()
@@ -216,12 +234,15 @@ def create_post(
 def find_post(post_id: int, current_user_id: int | None = None) -> dict | None:
     db = SessionLocal()
     try:
-        post = (
+        query = (
             db.query(Post)
             .options(joinedload(Post.owner))
             .filter(Post.id == post_id, Post.deleted_at.is_(None))
-            .first()
         )
+        hidden_user_ids = get_hidden_user_ids(current_user_id)
+        if hidden_user_ids:
+            query = query.filter(Post.user_id.notin_(hidden_user_ids))
+        post = query.first()
         if not post:
             return None
         return _serialize_posts_batch(db, [post], current_user_id)[0]
@@ -238,7 +259,6 @@ def update_post(
 ) -> dict | None:
     db = SessionLocal()
     try:
-        # BE-H4: 처음부터 joinedload로 조회하여 커밋 후 재쿼리 방지
         post = db.query(Post).options(joinedload(Post.owner)).filter(Post.id == post_id).first()
         if not post:
             return None
@@ -252,7 +272,7 @@ def update_post(
 
         db.commit()
         db.refresh(post)
-        return _serialize_posts_batch(db, [post], current_user_id=None)[0]
+        return _serialize_posts_batch(db, [post], current_user_id=post.user_id)[0]
     except Exception:
         db.rollback()
         raise
@@ -261,7 +281,6 @@ def update_post(
 
 
 def delete_post(post_id: int) -> None:
-    """BE-H3: Hard Delete → Soft Delete. deleted_at 컬럼 활용."""
     db = SessionLocal()
     try:
         db.execute(
@@ -278,7 +297,6 @@ def delete_post(post_id: int) -> None:
 
 
 def increment_views(post_id: int) -> None:
-    """BE-H2: Read→Modify→Write 경쟁 조건 제거. 단일 원자적 UPDATE로 처리."""
     db = SessionLocal()
     try:
         db.execute(
@@ -339,6 +357,70 @@ def remove_like(user_id: int, post_id: int) -> None:
         db.close()
 
 
+def is_bookmarked(user_id: int, post_id: int) -> bool:
+    db = SessionLocal()
+    try:
+        bookmark = (
+            db.query(PostBookmark)
+            .filter(PostBookmark.user_id == user_id, PostBookmark.post_id == post_id)
+            .first()
+        )
+        return bookmark is not None
+    finally:
+        db.close()
+
+
+def add_bookmark(user_id: int, post_id: int) -> bool:
+    db = SessionLocal()
+    try:
+        db.add(PostBookmark(user_id=user_id, post_id=post_id))
+        db.commit()
+        return True
+    except IntegrityError:
+        db.rollback()
+        return False
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def remove_bookmark(user_id: int, post_id: int) -> None:
+    db = SessionLocal()
+    try:
+        db.query(PostBookmark).filter(PostBookmark.user_id == user_id, PostBookmark.post_id == post_id).delete()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def list_bookmarked_posts(user_id: int, page: int = 1, limit: int = 10) -> list[dict]:
+    db = SessionLocal()
+    try:
+        hidden_user_ids = get_hidden_user_ids(user_id)
+        query = (
+            db.query(Post)
+            .join(PostBookmark, PostBookmark.post_id == Post.id)
+            .options(joinedload(Post.owner))
+            .filter(PostBookmark.user_id == user_id, Post.deleted_at.is_(None))
+        )
+        if hidden_user_ids:
+            query = query.filter(Post.user_id.notin_(hidden_user_ids))
+        posts = (
+            query.order_by(PostBookmark.created_at.desc(), Post.id.desc())
+            .offset((page - 1) * limit)
+            .limit(limit)
+            .all()
+        )
+        return _serialize_posts_batch(db, posts, current_user_id=user_id)
+    finally:
+        db.close()
+
+
 def get_trending(
     days: int = 7,
     limit: int = 5,
@@ -355,6 +437,7 @@ def get_trending(
         )
         comments_subq = (
             db.query(Comment.post_id.label("post_id"), func.count(Comment.id).label("comments_count"))
+            .filter(Comment.deleted_at.is_(None))
             .group_by(Comment.post_id)
             .subquery()
         )
@@ -366,16 +449,18 @@ def get_trending(
             + (capped_views * 0.1)
         )
 
-        top_posts = (
+        query = (
             db.query(Post)
             .options(joinedload(Post.owner))
             .outerjoin(likes_subq, likes_subq.c.post_id == Post.id)
             .outerjoin(comments_subq, comments_subq.c.post_id == Post.id)
             .filter(Post.created_at >= cutoff, Post.deleted_at.is_(None))
-            .order_by(desc(hot_score), desc(Post.created_at))
-            .limit(limit)
-            .all()
         )
+        hidden_user_ids = get_hidden_user_ids(current_user_id)
+        if hidden_user_ids:
+            query = query.filter(Post.user_id.notin_(hidden_user_ids))
+
+        top_posts = query.order_by(desc(hot_score), desc(Post.created_at)).limit(limit).all()
 
         top_tags_rows = (
             db.query(Tag.name, func.count(PostTag.id).label("count"))
