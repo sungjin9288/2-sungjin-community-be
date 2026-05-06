@@ -406,9 +406,9 @@ class RecommendationEngine:
         if budget == "가성비":
             score += 0.05
             reasons.append("가성비 조건을 반영")
-        elif budget == "프리미엄" and any(word in text for word in ("파인다이닝", "코스", "오마카세")):
+        elif budget in {"프리미엄", "비싸도 됨"} and any(word in text for word in ("파인다이닝", "코스", "오마카세")):
             score += 0.15
-            reasons.append("프리미엄/코스 선호를 반영")
+            reasons.append("프리미엄/코스 허용 조건을 반영")
 
         avoided = self._list_profile(profile, "avoid") + self._list_profile(profile, "disliked_categories")
         if any(word.lower() in text for word in avoided):

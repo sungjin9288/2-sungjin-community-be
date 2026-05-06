@@ -234,3 +234,14 @@ class Notification(Base):
 
     user = relationship("User", foreign_keys=[user_id], back_populates="notifications")
     actor = relationship("User", foreign_keys=[actor_id], back_populates="actor_notifications")
+
+
+class ChatbotMemory(Base):
+    __tablename__ = "chatbot_memories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String(128), unique=True, nullable=False, index=True)
+    profile_json = Column(Text, nullable=False, default="{}")
+    feedback_json = Column(Text, nullable=False, default="{}")
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())

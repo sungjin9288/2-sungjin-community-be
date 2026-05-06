@@ -128,6 +128,9 @@ This backend repository owns the following responsibilities:
 
 ### Restaurant Chatbot / 식당 추천 챗봇 *(신규)*
 - `POST /chatbot/chat` — 식당 추천 챗봇 대화
+- `POST /chatbot/chat/stream` — SSE 기반 스트리밍 응답
+- `POST /chatbot/feedback` — 추천 카드 좋아요/별로예요/저장 피드백 반영
+- `GET /chatbot/profile` — 세션별 장기 취향 프로필 조회
 - `POST /chatbot/reset` — 대화 기록 초기화
 - `GET /chatbot/status` — 추천 엔진 / LLM 초기화 상태 확인
 
@@ -139,7 +142,8 @@ This backend repository owns the following responsibilities:
 POST /chatbot/chat
     ↓
 ChatbotController
-    ├── RecommendationEngine   (BM25 + 행동 로그 랭킹)
+    ├── PersonalizationStore   (DB-backed long-term preference memory)
+    ├── RecommendationEngine   (BM25 + 행동 로그 + 개인화 랭킹)
     │     ├── kiwipiepy 형태소 분석
     │     ├── BM25Okapi 검색 (rank_bm25)
     │     └── 세션 기반 query 전파 + 이벤트 가중치 스코어링
@@ -156,6 +160,10 @@ ChatbotController
   - `data/log_cache.pkl`이 있으면 서버 시작 시 사전 집계된 로그 인덱스를 로드
 - **상황형 query 보정**: 토큰 단독 점수와 별도로 query phrase index를 두어 `성수 데이트`처럼 같이 등장한 검색 의도를 반영
 - **결합 스코어**: `0.45 × BM25 + 0.40 × 의도로그 + 0.15 × 인기도`
+- **개인화 결합 스코어**: `0.35 × BM25 + 0.30 × 의도로그 + 0.15 × 인기도 + 0.20 × 개인 취향`
+- **장기 메모리**: 기본값은 SQLAlchemy DB의 `chatbot_memories` 테이블이며, `CHATBOT_MEMORY_BACKEND=memory` 설정 시 인메모리만 사용
+- **피드백 루프**: 추천 카드의 좋아요/별로예요/저장 데이터를 프로필과 재랭킹에 반영
+- **추가 질문 흐름**: 지역만 있는 요청처럼 조건이 부족하면 메뉴/상황을 먼저 질문
 - **라면 맛집 의도 보정**: 오마카세 후식라면 매장은 '라면' 검색 로그에서 클릭·예약이 없으므로 의도 스코어가 낮아 자동 하위 랭크
 
 ### 추천 캐시 및 평가

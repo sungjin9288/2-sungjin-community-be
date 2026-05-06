@@ -7,13 +7,14 @@ POST /chatbot/chat      — 챗봇 메시지 전송
 POST /chatbot/chat/stream — 챗봇 메시지 전송(SSE)
 POST /chatbot/reset     — 대화 기록 초기화
 POST /chatbot/feedback  — 추천 피드백 기록
+GET  /chatbot/profile   — 장기 메모리 프로필 조회
 GET  /chatbot/status    — 엔진/챗봇 초기화 상태 확인
 """
 
 import re
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 
 from app.chatbot import chatbot_controller
@@ -106,6 +107,13 @@ def record_feedback(payload: FeedbackRequest):
         action=payload.action,
         shop=payload.shop,
     )
+
+
+@router.get("/profile")
+def get_profile(session_id: str | None = Query(None, max_length=128)):
+    """세션에 저장된 챗봇 장기 취향 프로필을 반환합니다."""
+    resolved_session_id = _resolve_session_id(session_id)
+    return chatbot_controller.get_profile(resolved_session_id)
 
 
 @router.get("/status")

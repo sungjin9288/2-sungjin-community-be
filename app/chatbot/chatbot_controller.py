@@ -21,7 +21,9 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.chatbot.chatbot_chain import chatbot_chain
 from app.chatbot.personalization import (
+    clarification_suggestions,
     clarification_question,
+    extract_preferences,
     is_food_related,
     personalization_store,
     profile_summary,
@@ -50,6 +52,7 @@ def _chat_payload(
 
     logger.info("챗봇 요청 (session=%s): %r", session_id, user_message[:80])
 
+    current_profile = extract_preferences(user_message)
     merged_profile = personalization_store.update_from_message(
         session_id=session_id,
         message=user_message,
@@ -57,15 +60,27 @@ def _chat_payload(
     )
     summary = profile_summary(merged_profile)
 
-    if is_food_related(user_message) and should_ask_clarification(user_message, merged_profile):
-        question = clarification_question(merged_profile)
+    if is_food_related(user_message) and should_ask_clarification(
+        user_message,
+        merged_profile,
+        current_profile=current_profile,
+    ):
+        question = clarification_question(
+            merged_profile,
+            message=user_message,
+            current_profile=current_profile,
+        )
         return {
             "reply": question,
             "recommended": [],
             "profile": merged_profile,
             "profile_summary": summary,
             "clarification": True,
-            "next_questions": [question],
+            "next_questions": clarification_suggestions(
+                merged_profile,
+                message=user_message,
+                current_profile=current_profile,
+            ),
         }
 
     # 추천 엔진 실행
@@ -129,6 +144,18 @@ def reset_session(session_id: str = "default") -> JSONResponse:
     chatbot_chain.reset_memory(session_id)
     personalization_store.reset(session_id)
     return ok(message="session_reset", data=None)
+
+
+def get_profile(session_id: str = "default") -> JSONResponse:
+    profile = personalization_store.get_profile(session_id)
+    return ok(
+        message="profile_loaded",
+        data={
+            "profile": profile,
+            "profile_summary": profile_summary(profile),
+            "storage": personalization_store.backend,
+        },
+    )
 
 
 def record_feedback(

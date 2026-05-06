@@ -15,6 +15,7 @@ from app.database import SessionLocal, engine
 from app.db_models import (
     Base,
     Comment,
+    ChatbotMemory,
     DirectMessage,
     Like,
     Notification,
@@ -45,6 +46,7 @@ def clean_db():
     db = SessionLocal()
     try:
         for table_model in [
+            ChatbotMemory,
             Notification,
             Report,
             UserBlock,

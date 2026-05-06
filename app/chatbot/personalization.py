@@ -3,12 +3,15 @@ personalization.py
 
 식당 추천 챗봇의 세션별 취향 프로필과 피드백을 관리한다.
 
-영속 DB를 추가하지 않고 LocalStorage payload + 서버 인메모리 세션 상태를 병합한다.
-나중에 Redis/DB로 옮길 수 있도록 순수 dict 기반 인터페이스로 유지한다.
+LocalStorage payload + 서버 세션 상태를 병합하고, 기본적으로 DB에 장기 저장한다.
+CHATBOT_MEMORY_BACKEND=memory 로 설정하면 DB 쓰기를 건너뛸 수 있다.
 """
 
 from __future__ import annotations
 
+import json
+import logging
+import os
 import re
 import time
 from collections import Counter, OrderedDict
@@ -60,7 +63,8 @@ SITUATION_KEYWORDS = (
 )
 
 AVOID_KEYWORDS = (
-    "비싼", "비싸", "웨이팅", "노키즈", "술집", "시끄러운", "오마카세",
+    "비싼", "비싸", "웨이팅", "웨이팅 긴 곳", "긴 웨이팅", "노키즈",
+    "노키즈존", "술집", "술집 분위기", "시끄러운", "오마카세",
 )
 
 FOOD_KEYWORDS = set(CUISINE_KEYWORDS) | {
@@ -69,6 +73,10 @@ FOOD_KEYWORDS = set(CUISINE_KEYWORDS) | {
 SINGLE_TOKEN_PATTERNS = {
     "회": re.compile(r"(^|[^가-힣])회($|[^가-힣])|횟집|생선회"),
 }
+SLOT_KEYS = ("regions", "cuisines", "situations")
+DIRECT_AVOID_KEYWORDS = {"웨이팅 긴 곳", "긴 웨이팅", "노키즈", "노키즈존", "술집 분위기"}
+MEMORY_BACKEND = os.getenv("CHATBOT_MEMORY_BACKEND", "database").strip().lower()
+logger = logging.getLogger(__name__)
 
 
 def empty_profile() -> dict[str, Any]:
@@ -135,13 +143,26 @@ def extract_preferences(message: str) -> dict[str, Any]:
         if _contains_keyword(text, keyword):
             _append_unique(profile["situations"], keyword)
     for keyword in AVOID_KEYWORDS:
-        if _contains_keyword(text, keyword) and ("싫" in text or "말고" in text or "빼" in text or keyword in ("비싼", "비싸")):
+        should_avoid = (
+            "싫" in text
+            or "말고" in text
+            or "빼" in text
+            or "피해" in text
+            or "제외" in text
+            or "없는" in text
+            or "적은" in text
+            or "비싸지" in text
+            or keyword in DIRECT_AVOID_KEYWORDS
+        )
+        if _contains_keyword(text, keyword) and should_avoid:
             _append_unique(profile["avoid"], keyword)
 
-    if any(keyword in text for keyword in ("가성비", "저렴", "싸", "비싸지", "무난")):
+    if any(keyword in text for keyword in ("고급", "비싸도", "비싸도 됨", "파인다이닝", "기념일")):
+        profile["budget"] = "비싸도 됨"
+    elif any(keyword in text for keyword in ("중간", "보통", "적당")):
+        profile["budget"] = "중간"
+    elif any(keyword in text for keyword in ("가성비", "저렴", "비싸지", "무난", "싼 곳", "싸게")):
         profile["budget"] = "가성비"
-    elif any(keyword in text for keyword in ("고급", "비싸도", "파인다이닝", "기념일")):
-        profile["budget"] = "프리미엄"
 
     return profile
 
@@ -163,20 +184,77 @@ def missing_slots(message: str, profile: dict[str, Any]) -> list[str]:
     return missing
 
 
-def should_ask_clarification(message: str, profile: dict[str, Any]) -> bool:
+def _has_any_slot(profile: dict[str, Any], keys: tuple[str, ...] = SLOT_KEYS) -> bool:
+    return any(profile.get(key) for key in keys)
+
+
+def _has_slot(profile: dict[str, Any], key: str) -> bool:
+    return bool(profile.get(key))
+
+
+def _wants_saved_profile(message: str) -> bool:
+    text = str(message or "")
+    return any(keyword in text for keyword in ("내 취향", "저장한 취향", "취향 기준", "알아서", "기억한"))
+
+
+def should_ask_clarification(
+    message: str,
+    profile: dict[str, Any],
+    current_profile: dict[str, Any] | None = None,
+) -> bool:
     if not is_food_related(message):
         return False
     text = str(message or "").strip()
-    broad_patterns = ("맛집 추천", "식당 추천", "뭐 먹", "추천해줘", "추천해 줘")
-    has_concrete_slot = any(profile.get(key) for key in ("regions", "cuisines", "situations"))
-    if len(text) <= 8 and not has_concrete_slot:
+    if _wants_saved_profile(text):
+        return False
+
+    current = current_profile or extract_preferences(text)
+    current_has_region = _has_slot(current, "regions")
+    current_has_cuisine = _has_slot(current, "cuisines")
+    current_has_situation = _has_slot(current, "situations")
+    current_has_any = _has_any_slot(current)
+
+    broad_patterns = ("맛집 추천", "식당 추천", "뭐 먹", "추천해줘", "추천해 줘", "먹을까")
+    if len(text) <= 8 and not current_has_any:
         return True
-    if has_concrete_slot:
+
+    if current_has_cuisine and not current_has_region and not current_has_situation:
+        return False
+
+    if current_has_region and not current_has_cuisine and not current_has_situation:
+        return True
+    if current_has_region and current_has_situation and not current_has_cuisine:
+        return True
+    if current_has_situation and not current_has_region and not current_has_cuisine:
+        return True
+
+    if current_has_any:
+        return False
+
+    if _has_any_slot(profile) and not any(pattern in text for pattern in broad_patterns):
         return False
     return any(pattern in text for pattern in broad_patterns)
 
 
-def clarification_question(profile: dict[str, Any]) -> str:
+def clarification_question(
+    profile: dict[str, Any],
+    message: str = "",
+    current_profile: dict[str, Any] | None = None,
+) -> str:
+    current = current_profile or extract_preferences(message)
+    current_has_region = _has_slot(current, "regions")
+    current_has_cuisine = _has_slot(current, "cuisines")
+    current_has_situation = _has_slot(current, "situations")
+
+    if current_has_region and not current_has_cuisine and not current_has_situation:
+        region = current["regions"][0]
+        return f"{region} 기준이면 어떤 상황과 메뉴가 좋으세요? 예: 데이트 파스타, 혼밥 한식, 회식 고기"
+    if current_has_region and current_has_situation and not current_has_cuisine:
+        situation = current["situations"][0]
+        return f"{situation}용이면 어떤 메뉴가 좋으세요? 예: 파스타, 한식, 고기, 카페"
+    if current_has_situation and not current_has_region:
+        return "어느 지역에서 찾을까요? 예: 강남, 성수, 중구"
+
     missing = missing_slots("", profile)
     if "지역" in missing and "메뉴" in missing:
         return "어느 지역에서 어떤 메뉴를 찾고 계세요? 예: 성수 파스타, 중구 평냉, 강남 고기"
@@ -185,6 +263,36 @@ def clarification_question(profile: dict[str, Any]) -> str:
     if "메뉴" in missing:
         return "선호하는 메뉴나 음식 종류가 있을까요?"
     return "데이트, 혼밥, 회식처럼 어떤 상황인지 알려주시면 더 정확히 추천해드릴게요."
+
+
+def clarification_suggestions(
+    profile: dict[str, Any],
+    message: str = "",
+    current_profile: dict[str, Any] | None = None,
+) -> list[str]:
+    current = current_profile or extract_preferences(message)
+    region = (current.get("regions") or profile.get("regions") or ["강남"])[0]
+    situation = (current.get("situations") or profile.get("situations") or ["데이트"])[0]
+
+    if current.get("regions") and not current.get("cuisines") and not current.get("situations"):
+        return [
+            f"{region} 데이트 파스타",
+            f"{region} 혼밥 한식",
+            f"{region} 회식 고기",
+        ]
+    if current.get("regions") and current.get("situations") and not current.get("cuisines"):
+        return [
+            f"{region} {situation} 파스타",
+            f"{region} {situation} 한식",
+            f"{region} {situation} 고기",
+        ]
+    if current.get("situations") and not current.get("regions"):
+        return [
+            f"강남 {situation} 고기",
+            f"성수 {situation} 파스타",
+            f"중구 {situation} 평냉",
+        ]
+    return ["강남 데이트 파스타", "중구 평냉 가성비", "성수 카페"]
 
 
 def profile_summary(profile: dict[str, Any]) -> str:
@@ -209,14 +317,106 @@ class PersonalizationStore:
         self._sessions: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self._max_sessions = max_sessions
         self._ttl_seconds = ttl_seconds
+        self._backend = "memory" if MEMORY_BACKEND == "memory" else "database"
+
+    @property
+    def backend(self) -> str:
+        return self._backend
+
+    def _db_enabled(self) -> bool:
+        return self._backend == "database"
+
+    @staticmethod
+    def _parse_json(raw: str | None, fallback: dict[str, Any]) -> dict[str, Any]:
+        if not raw:
+            return deepcopy(fallback)
+        try:
+            payload = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            return deepcopy(fallback)
+        return payload if isinstance(payload, dict) else deepcopy(fallback)
+
+    def _load_persistent_entry(self, session_id: str) -> dict[str, Any] | None:
+        if not self._db_enabled():
+            return None
+        try:
+            from app.database import SessionLocal
+            from app.db_models import ChatbotMemory
+
+            db = SessionLocal()
+            try:
+                row = db.query(ChatbotMemory).filter(ChatbotMemory.session_id == session_id).first()
+                if row is None:
+                    return None
+                profile = merge_profiles(None, self._parse_json(row.profile_json, DEFAULT_PROFILE))
+                feedback_raw = self._parse_json(row.feedback_json, {})
+                feedback = {
+                    str(shop_id): str(action)
+                    for shop_id, action in feedback_raw.items()
+                    if str(action) in {"like", "dislike", "save"}
+                }
+                return {"profile": profile, "feedback": feedback}
+            finally:
+                db.close()
+        except Exception as exc:
+            logger.warning("챗봇 장기 메모리 로드 실패(session=%s): %s", session_id, exc)
+            return None
+
+    def _persist_entry(self, session_id: str, entry: dict[str, Any]) -> None:
+        if not self._db_enabled():
+            return
+        try:
+            from app.database import SessionLocal
+            from app.db_models import ChatbotMemory
+
+            db = SessionLocal()
+            try:
+                row = db.query(ChatbotMemory).filter(ChatbotMemory.session_id == session_id).first()
+                if row is None:
+                    row = ChatbotMemory(session_id=session_id)
+                    db.add(row)
+                row.profile_json = json.dumps(
+                    _normalize_profile(entry.get("profile")),
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+                row.feedback_json = json.dumps(
+                    dict(entry.get("feedback") or {}),
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+                db.commit()
+            finally:
+                db.close()
+        except Exception as exc:
+            logger.warning("챗봇 장기 메모리 저장 실패(session=%s): %s", session_id, exc)
+
+    def _delete_persistent_entry(self, session_id: str) -> None:
+        if not self._db_enabled():
+            return
+        try:
+            from app.database import SessionLocal
+            from app.db_models import ChatbotMemory
+
+            db = SessionLocal()
+            try:
+                row = db.query(ChatbotMemory).filter(ChatbotMemory.session_id == session_id).first()
+                if row is not None:
+                    db.delete(row)
+                    db.commit()
+            finally:
+                db.close()
+        except Exception as exc:
+            logger.warning("챗봇 장기 메모리 삭제 실패(session=%s): %s", session_id, exc)
 
     def _get_entry(self, session_id: str) -> dict[str, Any]:
         now = time.time()
         self._prune(now)
         if session_id not in self._sessions:
+            persistent = self._load_persistent_entry(session_id) or {}
             self._sessions[session_id] = {
-                "profile": empty_profile(),
-                "feedback": {},
+                "profile": persistent.get("profile") or empty_profile(),
+                "feedback": persistent.get("feedback") or {},
                 "created_at": now,
                 "last_access": now,
             }
@@ -247,6 +447,7 @@ class PersonalizationStore:
         profile = merge_profiles(entry["profile"], client_profile)
         profile = merge_profiles(profile, extract_preferences(message))
         entry["profile"] = profile
+        self._persist_entry(session_id, entry)
         return profile
 
     def get_profile(self, session_id: str) -> dict[str, Any]:
@@ -282,6 +483,8 @@ class PersonalizationStore:
                 elif action == "dislike":
                     _append_unique(profile["disliked_categories"], category)
 
+        self._persist_entry(session_id, entry)
+
         return {
             "profile": deepcopy(profile),
             "summary": profile_summary(profile),
@@ -290,10 +493,11 @@ class PersonalizationStore:
 
     def reset(self, session_id: str) -> None:
         self._sessions.pop(session_id, None)
+        self._delete_persistent_entry(session_id)
 
     def stats(self) -> dict[str, Any]:
         self._prune()
-        return {"session_count": len(self._sessions)}
+        return {"session_count": len(self._sessions), "storage": self._backend}
 
 
 personalization_store = PersonalizationStore()
