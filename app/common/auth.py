@@ -1,11 +1,9 @@
-from typing import Optional
-
 from fastapi import Request
 
 from app.common.jwt_tokens import decode_access_token
 
 
-def get_bearer_token_from_request(request: Request) -> Optional[str]:
+def get_bearer_token_from_request(request: Request) -> str | None:
     header = request.headers.get("Authorization")
     if not header:
         return None
@@ -19,7 +17,7 @@ def get_bearer_token_from_request(request: Request) -> Optional[str]:
     return token or None
 
 
-def get_user_id_from_request(request: Request) -> Optional[int]:
+def get_user_id_from_request(request: Request) -> int | None:
     access_token = get_bearer_token_from_request(request)
     if not access_token:
         return None

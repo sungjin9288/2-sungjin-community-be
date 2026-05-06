@@ -89,7 +89,6 @@ def _serialize_post(
     data["author_profile_image"] = post.owner.profile_image_url if post.owner else None
     data["likes_count"] = likes_count
     data["comments_count"] = comments_count
-    data["views"] = post.view_count
     data["view_count"] = post.view_count
     data["tags"] = tags
     data["is_author"] = bool(current_user_id and post.user_id == current_user_id)

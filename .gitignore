@@ -51,3 +51,6 @@ uploads/*
 
 # Local virtualenv
 .venv312/
+
+# Recommendation data (large CSV files — do not commit)
+data/*.csv

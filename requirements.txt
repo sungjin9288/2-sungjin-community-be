@@ -14,3 +14,11 @@ psycopg2-binary
 loguru
 mangum
 httpx
+# chatbot & recommendation
+langchain
+langchain-google-genai
+langchain-ollama
+langchain-community
+rank_bm25
+kiwipiepy
+pandas

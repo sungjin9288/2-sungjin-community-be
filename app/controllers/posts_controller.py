@@ -120,8 +120,7 @@ def get_post(post_id: int, current_user_id: int | None = None) -> JSONResponse:
         raise PostNotFoundError()
 
     posts_model.increment_views(post_id)
-    post["views"] = post.get("view_count", 0) + 1
-    post["view_count"] = post["views"]
+    post["view_count"] = post.get("view_count", 0) + 1
     return ok(message="read_detail_success", data=post)
 
 
@@ -168,9 +167,6 @@ def like_post(user_id: int, post_id: int) -> JSONResponse:
     post = posts_model.find_post(post_id, user_id)
     if not post:
         raise PostNotFoundError()
-
-    if posts_model.is_liked(user_id, post_id):
-        raise BusinessException(ErrorCode.INVALID_REQUEST_FORMAT, "이미 좋아요를 눌렀습니다.")
 
     created_like = posts_model.add_like(user_id, post_id)
     if not created_like:

@@ -15,12 +15,14 @@ This backend repository owns the following responsibilities:
 
 | Area | Scope |
 | --- | --- |
-| API Layer | auth, users, posts, comments, direct messages, image-related endpoints |
+| API Layer | auth, users, posts, comments, direct messages, image-related endpoints, **restaurant chatbot** |
 | Data Layer | SQLAlchemy models, session management, DB health check |
 | Security | password hashing, token-based auth flow, request validation |
 | Runtime | FastAPI app startup, static/uploads mounting, health endpoints |
 | Delivery | Docker image build, ECS task deployment support, Lambda container image support |
 | Verification | pytest regression coverage, health checks, deployment smoke readiness |
+| **Recommendation** | **BM25 + user behavior log ranking engine** |
+| **Chatbot** | **LangChain-based restaurant recommendation chatbot (Gemini / Ollama)** |
 
 ## 핵심 성과 | Key Outcomes
 - Built a **FastAPI REST API** supporting the full community lifecycle.
@@ -33,6 +35,7 @@ This backend repository owns the following responsibilities:
   - Lambda container image
   - Kubernetes-compatible container runtime
 - Verified integration with the frontend repository and GitHub Actions delivery flows.
+- **Implemented a restaurant recommendation chatbot** using LangChain + BM25 ranking based on real user behavior logs (7.1M rows).
 
 ## 기술 스택 | Tech Stack
 
@@ -52,6 +55,14 @@ This backend repository owns the following responsibilities:
 - `bcrypt`
 - `passlib`
 - `PyJWT`
+
+### Chatbot / Recommendation *(추가)*
+- `LangChain` — ConversationChain + ConversationBufferWindowMemory(k=5)
+- `langchain-google-genai` — Gemini 2.0 Flash (무료 API)
+- `langchain-ollama` — 로컬 Ollama (키 불필요)
+- `rank_bm25` — BM25Okapi 검색 인덱스
+- `kiwipiepy` — 한국어 형태소 분석
+- `pandas` — 710만 행 로그 벡터 처리
 
 ### Delivery / Platform
 - `Docker`
@@ -74,6 +85,8 @@ This backend repository owns the following responsibilities:
 - `ensure_runtime_directories()` creates `uploads/`, `uploads/profile/`, `uploads/post/`, and `static/` before mounts.
 - `/health` performs a real DB connectivity check using `SELECT 1`.
 - `/uploads` and `/static` are mounted as static paths for image/content serving.
+- **`RecommendationEngine.load()`** — on startup, loads `shops.csv` + `logs.csv` and builds a BM25 index and user behavior score maps in memory.
+- **`ChatbotChain.initialize()`** — on startup, connects to the configured LLM provider (Gemini or Ollama).
 
 ## 주요 기능 | Functional Scope
 
@@ -102,10 +115,68 @@ This backend repository owns the following responsibilities:
 - list by post
 - author ownership checks
 
+### Social / 소셜
+- block / unblock users
+- report posts, comments, users, messages
+- bookmark / unbookmark posts
+- notifications
+
 ### Static & Uploads / 정적 리소스
 - terms/privacy static serving
 - uploads mount for image delivery
 - Lambda container entrypoint for image-oriented runtime packaging
+
+### Restaurant Chatbot / 식당 추천 챗봇 *(신규)*
+- `POST /chatbot/chat` — 식당 추천 챗봇 대화
+- `POST /chatbot/reset` — 대화 기록 초기화
+- `GET /chatbot/status` — 추천 엔진 / LLM 초기화 상태 확인
+
+## 식당 추천 챗봇 | Restaurant Recommendation Chatbot
+
+### 아키텍처
+
+```
+POST /chatbot/chat
+    ↓
+ChatbotController
+    ├── RecommendationEngine   (BM25 + 행동 로그 랭킹)
+    │     ├── kiwipiepy 형태소 분석
+    │     ├── BM25Okapi 검색 (rank_bm25)
+    │     └── 세션 기반 query 전파 + 이벤트 가중치 스코어링
+    └── ChatbotChain           (LangChain)
+          ├── Gemini 2.0 Flash (API)
+          └── Ollama llama3.2  (로컬)
+```
+
+### 추천 모델 설계
+- **BM25 인덱스**: `shop_name`, `address`, `categories`, `menus`, `facilities` 필드를 형태소 분석 후 인덱싱
+- **행동 로그 랭킹**: 710만 행 logs.csv 를 pandas 벡터 연산으로 처리
+  - 이벤트 가중치: `impression=0, click=1, view=2, bookmark=5, reservation=10`
+  - 세션 내 `impression/click` → `bookmark/reservation` 으로 `search_query` 전파 (ffill)
+- **결합 스코어**: `0.45 × BM25 + 0.40 × 의도로그 + 0.15 × 인기도`
+- **라면 맛집 의도 보정**: 오마카세 후식라면 매장은 '라면' 검색 로그에서 클릭·예약이 없으므로 의도 스코어가 낮아 자동 하위 랭크
+
+### LLM 설정
+`LLM_PROVIDER` 환경변수로 실시간 전환 가능:
+
+| 값 | LLM | 준비 사항 |
+|---|---|---|
+| `gemini` | Google Gemini 2.0 Flash | `GOOGLE_API_KEY` 설정 |
+| `ollama` | Ollama llama3.2 (로컬) | `ollama serve` 실행 |
+| `mock` | 규칙 기반 응답 | 없음 |
+
+### 대화 예시
+```
+[상황 1]
+유저: 중구 평냉 맛집 좀 추천해줘
+챗봇: 가격대는 어떤게 좋으세요?
+유저: 너무 비싸지 않은 곳으로
+챗봇: 강남에 ... (추천 결과)
+
+[상황 2]
+유저: 삼성전자 주가 좀 전망해줘
+챗봇: 저는 식당 추천 봇입니다. 죄송하지만 식당 관련 질의해 주시겠어요?
+```
 
 ## 현재 코드 기준 기술 포인트 | Implementation Notes
 
@@ -133,15 +204,23 @@ Relevant file:
 ```text
 2-sungjin-community-be/
 ├── app/
+│   ├── chatbot/                   # 식당 추천 챗봇 (신규)
+│   │   ├── recommendation_engine.py  # BM25 + 행동 로그 랭킹 엔진
+│   │   ├── chatbot_chain.py          # LangChain Gemini/Ollama 체인
+│   │   └── chatbot_controller.py     # 오케스트레이션
 │   ├── common/                    # shared helpers, response/exception utilities
 │   ├── controllers/               # business logic orchestration
 │   ├── core/                      # logging and shared runtime utilities
 │   ├── models/                    # domain access layer
 │   ├── routes/                    # FastAPI routers
+│   │   └── chatbot.py             # /chatbot/* 엔드포인트 (신규)
 │   ├── database.py                # engine / session configuration
 │   ├── db_models.py               # SQLAlchemy ORM models
 │   ├── lambda_handler.py          # Lambda container entrypoint
 │   └── main.py                    # FastAPI application bootstrap
+├── data/                          # CSV 데이터 (신규, .gitignore 처리)
+│   ├── shops.csv                  # 매장 정보 (500개)
+│   └── logs.csv                   # 사용자 행동 로그 (710만 행)
 ├── deploy/ecs/                    # ECS task definition template assets
 ├── scripts/                       # deployment helpers
 ├── tests/                         # pytest regression coverage
@@ -156,6 +235,7 @@ Relevant file:
 ### Prerequisites
 - `Python 3.11+`
 - optional virtual environment tooling
+- (챗봇) `GOOGLE_API_KEY` 또는 로컬 Ollama 서버
 
 ### Install
 ```bash
@@ -167,11 +247,22 @@ pip install -r requirements.txt
 ```
 
 ### Environment
-Example local environment:
+Example local environment (`.env`):
 
 ```env
 DATABASE_URL=sqlite:///./community.db
 CORS_ALLOW_ORIGINS=http://localhost:3001,http://127.0.0.1:3001
+
+# 챗봇 설정
+LLM_PROVIDER=gemini          # gemini | ollama | mock
+GOOGLE_API_KEY=your-key-here
+GEMINI_MODEL=gemini-2.0-flash
+
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3.2
+
+SHOPS_CSV_PATH=data/shops.csv
+LOGS_CSV_PATH=data/logs.csv
 ```
 
 ### Run
@@ -188,6 +279,22 @@ Open:
 - `http://localhost:8000`
 - Swagger UI: `http://localhost:8000/docs`
 - ReDoc: `http://localhost:8000/redoc`
+
+### Chatbot quick test
+```bash
+# 상태 확인
+curl http://localhost:8000/chatbot/status
+
+# 식당 추천
+curl -X POST http://localhost:8000/chatbot/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "강남 파스타 데이트 맛집 추천해줘"}'
+
+# 비관련 질문 거절 확인
+curl -X POST http://localhost:8000/chatbot/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "삼성전자 주가 전망해줘"}'
+```
 
 ## 테스트 / 검증 | Test & Verification
 
@@ -217,10 +324,12 @@ The paired frontend repository provides higher-level smoke validation via:
 | --- | --- |
 | Auth | `/auth/signup`, `/auth/login`, `/auth/refresh`, `/auth/logout`, `/auth/check-email`, `/auth/check-nickname` |
 | Users | `/users/me`, `/users/me/password`, account management routes |
-| Posts | post list/detail/create/update/delete |
-| Comments | comment create/list/update/delete |
+| Posts | post list/detail/create/update/delete, like, bookmark, trending |
+| Comments | comment create/list/update/delete (threaded) |
 | Messages | `/messages/users`, `/messages/conversations`, `/messages/with/{user_id}`, `/messages` |
+| Social | block/unblock, report, notifications |
 | Images | image-related upload helpers and mounted static paths |
+| **Chatbot** | **`POST /chatbot/chat`, `POST /chatbot/reset`, `GET /chatbot/status`** |
 
 ## 배포 자산 | Delivery Assets
 
@@ -262,6 +371,8 @@ This repository demonstrates:
 - health-check-aware deployment readiness
 - multi-target packaging strategy (EC2 / ECS / Lambda / K8s)
 - cost-aware operations after validation
+- **LLM-integrated chatbot with multi-provider support (Gemini / Ollama)**
+- **user behavior log-based recommendation ranking at scale (7.1M rows)**
 
 ## Cost Control / 비용 정리 원칙
 Because this project is a personal portfolio artifact, not a commercial service, the validated cloud runtime resources were removed after verification.

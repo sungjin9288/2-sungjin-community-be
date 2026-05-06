@@ -25,10 +25,8 @@ def signup(email: str, password: str, nickname: str) -> dict:
         raise EmailAlreadyExistsError()
     if users_model.is_nickname_exists(nickname):
         raise NicknameAlreadyExistsError()
-    if len(password) < 8 or len(password) > 20:
-        raise InvalidPasswordError("비밀번호는 8자 이상, 20자 이하여야 합니다.")
     if not PASSWORD_PATTERN.match(password):
-        raise InvalidPasswordError("비밀번호는 대문자, 소문자, 숫자, 특수문자를 각각 최소 1개 포함해야 합니다.")
+        raise InvalidPasswordError()
 
     user = users_model.create_user(
         email=email,

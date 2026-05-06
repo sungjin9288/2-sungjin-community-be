@@ -17,6 +17,9 @@ from app.common.responses import fail
 from app.core.logger import setup_logging
 from app.database import engine
 from app.routes import auth, comments, images, messages, notifications, posts, social, users
+from app.routes import chatbot as chatbot_router
+from app.chatbot.recommendation_engine import recommendation_engine
+from app.chatbot.chatbot_chain import chatbot_chain
 
 
 def ensure_runtime_directories() -> None:
@@ -51,6 +54,9 @@ async def lifespan(app: FastAPI):
     ensure_runtime_directories()
     db_models.Base.metadata.create_all(bind=engine)
     ensure_additive_schema()
+    # 추천 엔진 & 챗봇 초기화 (CSV 로드 + BM25 인덱스 빌드)
+    recommendation_engine.load()
+    chatbot_chain.initialize()
     yield
     logger.info("Application shutting down...")
 
@@ -73,7 +79,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-ensure_runtime_directories()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
@@ -85,6 +90,7 @@ app.include_router(images.router)
 app.include_router(messages.router)
 app.include_router(notifications.router)
 app.include_router(social.router)
+app.include_router(chatbot_router.router)
 
 
 @app.get("/")
