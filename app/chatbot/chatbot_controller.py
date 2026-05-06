@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 RECOMMEND_TOP_K = 5
 
 
-def chat(user_message: str) -> JSONResponse:
+def chat(user_message: str, session_id: str = "default") -> JSONResponse:
     """
     사용자 메시지를 받아 챗봇 응답과 추천 식당 목록을 반환한다.
     """
@@ -34,7 +34,7 @@ def chat(user_message: str) -> JSONResponse:
     if not user_message:
         raise MissingRequiredFieldsError("메시지를 입력해주세요.")
 
-    logger.info("챗봇 요청: %r", user_message[:80])
+    logger.info("챗봇 요청 (session=%s): %r", session_id, user_message[:80])
 
     # 추천 엔진 실행
     recommended: list[dict] = []
@@ -51,6 +51,7 @@ def chat(user_message: str) -> JSONResponse:
         reply = chatbot_chain.chat(
             user_message=user_message,
             recommended_shops=recommended,
+            session_id=session_id,
         )
     except Exception as exc:
         logger.error("챗봇 응답 생성 오류: %s", exc)
@@ -67,7 +68,7 @@ def chat(user_message: str) -> JSONResponse:
     )
 
 
-def reset_session() -> JSONResponse:
+def reset_session(session_id: str = "default") -> JSONResponse:
     """대화 기록 초기화."""
-    chatbot_chain.reset_memory()
+    chatbot_chain.reset_memory(session_id)
     return ok(message="session_reset", data=None)

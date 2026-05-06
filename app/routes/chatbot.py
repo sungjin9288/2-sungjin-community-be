@@ -8,6 +8,8 @@ POST /chatbot/reset     — 대화 기록 초기화
 GET  /chatbot/status    — 엔진/챗봇 초기화 상태 확인
 """
 
+import re
+
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
@@ -17,12 +19,29 @@ from app.chatbot.recommendation_engine import recommendation_engine
 from app.common.responses import ok
 
 router = APIRouter(prefix="/chatbot", tags=["chatbot"])
+SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 
 
 class ChatRequest(BaseModel):
     message: str = Field(
         ..., min_length=1, max_length=500, description="사용자 메시지"
     )
+    session_id: str | None = Field(
+        None, max_length=128, description="세션 격리를 위한 고유 ID"
+    )
+
+
+class ResetRequest(BaseModel):
+    session_id: str | None = Field(
+        None, max_length=128, description="세션 격리를 위한 고유 ID"
+    )
+
+
+def _resolve_session_id(value: str | None) -> str:
+    session_id = (value or "default").strip()
+    if not SESSION_ID_RE.fullmatch(session_id):
+        return "default"
+    return session_id
 
 
 @router.post("/chat")
@@ -33,13 +52,18 @@ def chat(payload: ChatRequest):
     - 식당/지역 관련 질문 → 추천 모델 기반 응답
     - 비관련 질문 → 정중히 거절
     """
-    return chatbot_controller.chat(user_message=payload.message)
+    session_id = _resolve_session_id(payload.session_id)
+    return chatbot_controller.chat(
+        user_message=payload.message,
+        session_id=session_id
+    )
 
 
 @router.post("/reset")
-def reset_session():
+def reset_session(payload: ResetRequest | None = None):
     """대화 기록(메모리)을 초기화합니다."""
-    return chatbot_controller.reset_session()
+    session_id = _resolve_session_id(payload.session_id if payload else None)
+    return chatbot_controller.reset_session(session_id)
 
 
 @router.get("/status")

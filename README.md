@@ -153,8 +153,19 @@ ChatbotController
 - **행동 로그 랭킹**: 710만 행 logs.csv 를 pandas 벡터 연산으로 처리
   - 이벤트 가중치: `impression=0, click=1, view=2, bookmark=5, reservation=10`
   - 세션 내 `impression/click` → `bookmark/reservation` 으로 `search_query` 전파 (ffill)
+  - `data/log_cache.pkl`이 있으면 서버 시작 시 사전 집계된 로그 인덱스를 로드
+- **상황형 query 보정**: 토큰 단독 점수와 별도로 query phrase index를 두어 `성수 데이트`처럼 같이 등장한 검색 의도를 반영
 - **결합 스코어**: `0.45 × BM25 + 0.40 × 의도로그 + 0.15 × 인기도`
 - **라면 맛집 의도 보정**: 오마카세 후식라면 매장은 '라면' 검색 로그에서 클릭·예약이 없으므로 의도 스코어가 낮아 자동 하위 랭크
+
+### 추천 캐시 및 평가
+```bash
+# 710만 행 로그를 사전 집계해 서버 cold start를 줄임
+python scripts/preprocess_logs.py --force
+
+# 샘플 로그 기준 NDCG/MRR/latency 측정
+python scripts/evaluate_recommendation.py --max-rows 100000 --max-queries 20 --top-k 5
+```
 
 ### LLM 설정
 `LLM_PROVIDER` 환경변수로 실시간 전환 가능:

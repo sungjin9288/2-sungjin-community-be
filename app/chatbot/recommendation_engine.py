@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
+import pickle
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -36,6 +37,7 @@ EVENT_WEIGHTS: dict[str, float] = {
     "reservation": 10.0,
 }
 DEFAULT_TOP_K = 5
+LOG_CACHE_VERSION = 2
 
 # ─── 형태소 분석 (kiwipiepy 우선, fallback: 공백 분리) ────────────────────── #
 try:
@@ -141,6 +143,12 @@ def _propagate_queries_and_aggregate(logs_df: pd.DataFrame) -> pd.DataFrame:
     return df.loc[mask, ["shop_id", "search_query", "event_type", "weight"]].reset_index(drop=True)
 
 
+def _normalize_query(text: str) -> str:
+    """query 비교용 정규화 key. 형태소 토큰이 있으면 토큰열을 기준으로 한다."""
+    tokens = _tokenize(str(text or ""))
+    return " ".join(tokens).strip()
+
+
 def _build_popularity_index(events_df: pd.DataFrame) -> dict[str, float]:
     """shop_id → 인기도 (0~1 정규화)."""
     if events_df.empty:
@@ -161,9 +169,10 @@ def _build_query_token_index(events_df: pd.DataFrame) -> dict[str, dict[str, flo
         return {}
 
     index: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
-    for _, row in events_df.iterrows():
-        for tok in _tokenize(row["search_query"]):
-            index[tok][row["shop_id"]] += row["weight"]
+    grouped = events_df.groupby(["search_query", "shop_id"], as_index=False)["weight"].sum()
+    for row in grouped.itertuples(index=False):
+        for tok in _tokenize(row.search_query):
+            index[tok][row.shop_id] += row.weight
 
     normalized: dict[str, dict[str, float]] = {}
     for tok, shop_map in index.items():
@@ -171,6 +180,46 @@ def _build_query_token_index(events_df: pd.DataFrame) -> dict[str, dict[str, flo
         normalized[tok] = {sid: v / max_v for sid, v in shop_map.items()}
 
     return normalized
+
+
+def _build_query_phrase_index(events_df: pd.DataFrame) -> dict[str, dict[str, float]]:
+    """
+    정규화된 전체 query/부분 phrase → { shop_id: 정규화 가중치 합 }.
+
+    토큰 단독 합산은 "성수 인기"와 "데이트 인기"를 섞을 수 있으므로,
+    실제 검색 로그에 같이 등장한 phrase를 별도 신호로 둔다.
+    """
+    if events_df.empty:
+        return {}
+
+    df = events_df.copy()
+    df["query_key"] = df["search_query"].map(_normalize_query)
+    df = df[df["query_key"] != ""]
+    if df.empty:
+        return {}
+
+    grouped = df.groupby(["query_key", "shop_id"], as_index=False)["weight"].sum()
+    index: dict[str, dict[str, float]] = {}
+    for query_key, group in grouped.groupby("query_key"):
+        shop_map = dict(zip(group["shop_id"], group["weight"], strict=False))
+        max_v = max(shop_map.values()) or 1.0
+        index[query_key] = {sid: v / max_v for sid, v in shop_map.items()}
+    return index
+
+
+def _query_phrase_keys(tokens: list[str]) -> list[str]:
+    """입력 query 토큰에서 full phrase와 2~3gram 후보를 만든다."""
+    if len(tokens) < 2:
+        return []
+
+    keys: list[str] = [" ".join(tokens)]
+    max_size = min(3, len(tokens))
+    for size in range(max_size, 1, -1):
+        for start in range(0, len(tokens) - size + 1):
+            key = " ".join(tokens[start:start + size])
+            if key not in keys:
+                keys.append(key)
+    return keys
 
 
 # ─── 추천 엔진 ────────────────────────────────────────────────────────────── #
@@ -187,6 +236,7 @@ class RecommendationEngine:
         self._bm25: Any = None
         self._popularity: dict[str, float] = {}
         self._query_token_index: dict[str, dict[str, float]] = {}
+        self._query_phrase_index: dict[str, dict[str, float]] = {}
         self._loaded = False
 
     def load(
@@ -196,24 +246,72 @@ class RecommendationEngine:
     ) -> None:
         shops_path = shops_path or os.getenv("SHOPS_CSV_PATH", "data/shops.csv")
         logs_path = logs_path or os.getenv("LOGS_CSV_PATH", "data/logs.csv")
+        cache_path = os.getenv("LOG_CACHE_PATH", "data/log_cache.pkl")
 
         shops_df = self._safe_read_csv(shops_path, "shops")
-        logs_df = self._safe_read_csv(logs_path, "logs")
 
         self._shops = self._parse_shops(shops_df)
         corpus = [_tokenize(s.document_text()) for s in self._shops]
         self._bm25 = _build_bm25(corpus)
 
+        if self._load_log_cache(cache_path):
+            self._loaded = True
+            logger.info(
+                "추천 엔진 로드 완료: 매장 %d개, 로그 캐시 사용",
+                len(self._shops),
+            )
+            return
+
+        logs_df = self._safe_read_csv(logs_path, "logs")
         logger.info("로그 집계 시작 (총 %d행)...", len(logs_df))
         events = _propagate_queries_and_aggregate(logs_df)
-        self._popularity = _build_popularity_index(events)
-        self._query_token_index = _build_query_token_index(events)
+        self._build_log_indexes(events)
 
         self._loaded = True
         logger.info(
             "추천 엔진 로드 완료: 매장 %d개, 유효 이벤트 %d건",
             len(self._shops), len(events),
         )
+
+    def _build_log_indexes(self, events: pd.DataFrame) -> None:
+        self._popularity = _build_popularity_index(events)
+        self._query_token_index = _build_query_token_index(events)
+        self._query_phrase_index = _build_query_phrase_index(events)
+
+    def _load_log_cache(self, path: str) -> bool:
+        p = Path(path)
+        if not p.exists():
+            logger.info("로그 캐시 없음: %s", path)
+            return False
+        try:
+            with open(p, "rb") as f:
+                cache = pickle.load(f)
+        except Exception as exc:
+            logger.warning("로그 캐시 로드 실패, CSV 집계로 전환: %s", exc)
+            return False
+
+        if not isinstance(cache, dict):
+            logger.warning("로그 캐시 형식 오류, CSV 집계로 전환: %s", path)
+            return False
+
+        self._popularity = cache.get("popularity") or {}
+        self._query_token_index = cache.get("query_token_index") or {}
+        self._query_phrase_index = cache.get("query_phrase_index") or {}
+        version = cache.get("version")
+        if version != LOG_CACHE_VERSION:
+            logger.warning(
+                "로그 캐시 버전 불일치(version=%s, expected=%s). 재생성 권장: python scripts/preprocess_logs.py --force",
+                version,
+                LOG_CACHE_VERSION,
+            )
+
+        logger.info(
+            "로그 캐시 로드 완료: popularity=%d, token_index=%d, phrase_index=%d",
+            len(self._popularity),
+            len(self._query_token_index),
+            len(self._query_phrase_index),
+        )
+        return bool(self._popularity or self._query_token_index)
 
     @staticmethod
     def _safe_read_csv(path: str, label: str) -> pd.DataFrame:
@@ -269,10 +367,26 @@ class RecommendationEngine:
         bm25_norm = [s / bm25_max for s in bm25_raw]
 
         # 2) 행동 로그 의도 스코어
-        intent = [
+        token_intent = [
             sum(self._query_token_index.get(tok, {}).get(s.shop_id, 0.0) for tok in query_tokens)
             / len(query_tokens)
             for s in self._shops
+        ]
+
+        phrase_keys = _query_phrase_keys(query_tokens)
+        phrase_maps = [
+            self._query_phrase_index[key]
+            for key in phrase_keys
+            if key in self._query_phrase_index
+        ]
+        phrase_intent = [
+            max((phrase_map.get(s.shop_id, 0.0) for phrase_map in phrase_maps), default=0.0)
+            for s in self._shops
+        ]
+
+        intent = [
+            max(phrase_score, token_score * 0.75)
+            for phrase_score, token_score in zip(phrase_intent, token_intent)
         ]
 
         # 3) 전체 인기도
