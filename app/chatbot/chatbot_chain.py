@@ -41,6 +41,11 @@ RESTAURANT_CONTEXT_TEMPLATE = """\
 {restaurants}
 """
 
+PREFERENCE_CONTEXT_TEMPLATE = """\
+[사용자 취향]
+{summary}
+"""
+
 NO_RESTAURANT_CONTEXT = "[추천 식당 목록]\n현재 조건에 맞는 식당이 없습니다.\n"
 DEFAULT_SESSION_TTL_SECONDS = 60 * 60
 DEFAULT_MAX_SESSIONS = 200
@@ -65,6 +70,8 @@ def _format_restaurant(r: dict, rank: int) -> str:
         lines.append(f"   메뉴: {', '.join(r['menus'][:4])}")
     if r.get("facilities"):
         lines.append(f"   편의: {', '.join(r['facilities'][:3])}")
+    if r.get("reasons"):
+        lines.append(f"   추천 이유: {', '.join(r['reasons'][:3])}")
     return "\n".join(lines)
 
 
@@ -223,7 +230,13 @@ class ChatbotChain:
     # ------------------------------------------------------------------ #
     # 대화
     # ------------------------------------------------------------------ #
-    def chat(self, user_message: str, recommended_shops: list[dict], session_id: str = "default") -> str:
+    def chat(
+        self,
+        user_message: str,
+        recommended_shops: list[dict],
+        session_id: str = "default",
+        preference_summary: str = "",
+    ) -> str:
         if not self._initialized or self._llm is None:
             return self._mock_response(user_message, recommended_shops)
 
@@ -240,7 +253,12 @@ class ChatbotChain:
         else:
             context = NO_RESTAURANT_CONTEXT
 
-        augmented = f"{context}\n사용자 질문: {user_message}"
+        preference_context = (
+            PREFERENCE_CONTEXT_TEMPLATE.format(summary=preference_summary)
+            if preference_summary
+            else ""
+        )
+        augmented = f"{preference_context}{context}\n사용자 질문: {user_message}"
 
         try:
             response = chain.predict(input=augmented)
@@ -262,11 +280,14 @@ class ChatbotChain:
             name = shop.get("shop_name") or shop.get("shop_id", "알 수 없음")
             addr = shop.get("address", "")
             cats = ", ".join(shop.get("categories", [])[:2])
+            reasons = ", ".join(shop.get("reasons", [])[:2])
             line = f"{i}. {name}"
             if addr:
                 line += f" ({addr[:24]})"
             if cats:
                 line += f" — {cats}"
+            if reasons:
+                line += f"\n   이유: {reasons}"
             lines.append(line)
         lines.append("\n아래 추천 카드는 서버 추천 모델 결과만 표시합니다.")
         return "\n".join(lines)
@@ -317,11 +338,14 @@ class ChatbotChain:
             name = shop.get("shop_name") or shop.get("shop_id", "알 수 없음")
             addr = shop.get("address", "")
             cats = ", ".join(shop.get("categories", [])[:2])
+            reasons = ", ".join(shop.get("reasons", [])[:2])
             line = f"{i}. {name}"
             if addr:
                 line += f" ({addr[:20]})"
             if cats:
                 line += f" — {cats}"
+            if reasons:
+                line += f"\n   이유: {reasons}"
             lines.append(line)
 
         lines.append("\n자세한 정보가 필요하시면 말씀해주세요!")

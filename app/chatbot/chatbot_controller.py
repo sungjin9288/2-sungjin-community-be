@@ -12,11 +12,21 @@ chatbot_controller.py
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
+from typing import Any
 
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.chatbot.chatbot_chain import chatbot_chain
+from app.chatbot.personalization import (
+    clarification_question,
+    is_food_related,
+    personalization_store,
+    profile_summary,
+    should_ask_clarification,
+)
 from app.chatbot.recommendation_engine import recommendation_engine
 from app.common.exceptions import MissingRequiredFieldsError
 from app.common.responses import ok
@@ -26,9 +36,13 @@ logger = logging.getLogger(__name__)
 RECOMMEND_TOP_K = 5
 
 
-def chat(user_message: str, session_id: str = "default") -> JSONResponse:
+def _chat_payload(
+    user_message: str,
+    session_id: str = "default",
+    profile: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """
-    사용자 메시지를 받아 챗봇 응답과 추천 식당 목록을 반환한다.
+    사용자 메시지를 받아 챗봇 응답 payload를 만든다.
     """
     user_message = (user_message or "").strip()
     if not user_message:
@@ -36,12 +50,34 @@ def chat(user_message: str, session_id: str = "default") -> JSONResponse:
 
     logger.info("챗봇 요청 (session=%s): %r", session_id, user_message[:80])
 
+    merged_profile = personalization_store.update_from_message(
+        session_id=session_id,
+        message=user_message,
+        client_profile=profile,
+    )
+    summary = profile_summary(merged_profile)
+
+    if is_food_related(user_message) and should_ask_clarification(user_message, merged_profile):
+        question = clarification_question(merged_profile)
+        return {
+            "reply": question,
+            "recommended": [],
+            "profile": merged_profile,
+            "profile_summary": summary,
+            "clarification": True,
+            "next_questions": [question],
+        }
+
     # 추천 엔진 실행
     recommended: list[dict] = []
     if recommendation_engine.is_ready():
         try:
             recommended = recommendation_engine.recommend(
-                user_message, top_k=RECOMMEND_TOP_K
+                user_message,
+                top_k=RECOMMEND_TOP_K,
+                profile=merged_profile,
+                feedback=personalization_store.get_feedback(session_id),
+                diversify=True,
             )
         except Exception as exc:
             logger.error("추천 엔진 오류: %s", exc)
@@ -52,6 +88,7 @@ def chat(user_message: str, session_id: str = "default") -> JSONResponse:
             user_message=user_message,
             recommended_shops=recommended,
             session_id=session_id,
+            preference_summary=summary,
         )
     except Exception as exc:
         logger.error("챗봇 응답 생성 오류: %s", exc)
@@ -59,16 +96,67 @@ def chat(user_message: str, session_id: str = "default") -> JSONResponse:
 
     logger.info("챗봇 응답 완료 (추천 %d개)", len(recommended))
 
+    return {
+        "reply": reply,
+        "recommended": recommended,
+        "profile": merged_profile,
+        "profile_summary": summary,
+        "clarification": False,
+        "next_questions": [
+            "더 저렴한 곳으로 다시 추천해줘",
+            "비슷하지만 분위기 좋은 곳으로 바꿔줘",
+            "저장한 취향 기준으로 다시 골라줘",
+        ],
+    }
+
+
+def chat(
+    user_message: str,
+    session_id: str = "default",
+    profile: dict[str, Any] | None = None,
+) -> JSONResponse:
+    """
+    사용자 메시지를 받아 챗봇 응답과 추천 식당 목록을 반환한다.
+    """
     return ok(
         message="chat_success",
-        data={
-            "reply": reply,
-            "recommended": recommended,
-        },
+        data=_chat_payload(user_message, session_id, profile),
     )
 
 
 def reset_session(session_id: str = "default") -> JSONResponse:
     """대화 기록 초기화."""
     chatbot_chain.reset_memory(session_id)
+    personalization_store.reset(session_id)
     return ok(message="session_reset", data=None)
+
+
+def record_feedback(
+    session_id: str,
+    shop_id: str,
+    action: str,
+    shop: dict[str, Any] | None = None,
+) -> JSONResponse:
+    result = personalization_store.record_feedback(session_id, shop_id, action, shop)
+    return ok(message="feedback_recorded", data=result)
+
+
+def chat_stream(
+    user_message: str,
+    session_id: str = "default",
+    profile: dict[str, Any] | None = None,
+) -> StreamingResponse:
+    async def event_generator():
+        payload = _chat_payload(user_message, session_id, profile)
+        reply = str(payload.get("reply") or "")
+        for token in reply.split(" "):
+            if token:
+                yield f"event: chunk\ndata: {json.dumps(token + ' ', ensure_ascii=False)}\n\n"
+                await asyncio.sleep(0.015)
+        yield f"event: done\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

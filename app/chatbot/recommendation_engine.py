@@ -228,7 +228,8 @@ class RecommendationEngine:
     서버 기동 시 한 번만 초기화하는 싱글턴 추천 엔진.
 
     결합 스코어:
-      score = 0.45 * bm25_norm + 0.40 * intent_log + 0.15 * popularity
+      기본 score = 0.45 * bm25_norm + 0.40 * intent_log + 0.15 * popularity
+      개인화 score = 0.35 * bm25_norm + 0.30 * intent_log + 0.15 * popularity + 0.20 * preference
     """
 
     def __init__(self) -> None:
@@ -350,7 +351,145 @@ class RecommendationEngine:
             ))
         return shops
 
-    def recommend(self, query: str, top_k: int = DEFAULT_TOP_K) -> list[dict]:
+    @staticmethod
+    def _shop_text(shop: ShopRecord) -> str:
+        return " ".join([
+            shop.shop_name,
+            shop.address,
+            " ".join(shop.categories),
+            " ".join(shop.menus),
+            " ".join(shop.facilities),
+            " ".join(shop.awards),
+        ]).lower()
+
+    @staticmethod
+    def _list_profile(profile: dict[str, Any] | None, key: str) -> list[str]:
+        if not isinstance(profile, dict):
+            return []
+        values = profile.get(key) or []
+        if isinstance(values, str):
+            return [values]
+        return [str(value) for value in values if str(value or "").strip()] if isinstance(values, list) else []
+
+    def _personal_score(
+        self,
+        shop: ShopRecord,
+        profile: dict[str, Any] | None,
+        feedback: dict[str, str] | None,
+    ) -> tuple[float, list[str]]:
+        if not profile and not feedback:
+            return 0.0, []
+
+        text = self._shop_text(shop)
+        score = 0.0
+        reasons: list[str] = []
+
+        regions = self._list_profile(profile, "regions")
+        matched_regions = [region for region in regions if region.lower() in text]
+        if matched_regions:
+            score += 0.35
+            reasons.append(f"선호 지역({matched_regions[0]})과 맞음")
+
+        cuisines = self._list_profile(profile, "cuisines") + self._list_profile(profile, "liked_categories")
+        matched_cuisines = [cuisine for cuisine in cuisines if cuisine.lower() in text]
+        if matched_cuisines:
+            score += 0.35
+            reasons.append(f"선호 메뉴/카테고리({matched_cuisines[0]})와 맞음")
+
+        situations = self._list_profile(profile, "situations")
+        matched_situations = [situation for situation in situations if situation.lower() in text]
+        if matched_situations:
+            score += 0.15
+            reasons.append(f"선호 상황({matched_situations[0]})에 적합")
+
+        budget = str((profile or {}).get("budget") or "")
+        if budget == "가성비":
+            score += 0.05
+            reasons.append("가성비 조건을 반영")
+        elif budget == "프리미엄" and any(word in text for word in ("파인다이닝", "코스", "오마카세")):
+            score += 0.15
+            reasons.append("프리미엄/코스 선호를 반영")
+
+        avoided = self._list_profile(profile, "avoid") + self._list_profile(profile, "disliked_categories")
+        if any(word.lower() in text for word in avoided):
+            score -= 0.4
+            reasons.append("회피 조건과 일부 겹침")
+
+        feedback = feedback or {}
+        if feedback.get(shop.shop_id) in {"like", "save"}:
+            score += 0.5
+            reasons.append("이전에 긍정 피드백한 매장")
+        elif feedback.get(shop.shop_id) == "dislike":
+            score -= 0.8
+            reasons.append("이전에 별로라고 표시한 매장")
+
+        return max(0.0, min(score, 1.0)), reasons
+
+    @staticmethod
+    def _score_reasons(
+        bm25_score: float,
+        intent_score: float,
+        popularity_score: float,
+        personal_reasons: list[str],
+    ) -> list[str]:
+        reasons: list[str] = []
+        if bm25_score >= 0.45:
+            reasons.append("검색어와 매장 정보가 잘 맞음")
+        if intent_score >= 0.25:
+            reasons.append("비슷한 검색에서 실제 반응이 좋음")
+        if popularity_score >= 0.35:
+            reasons.append("전체 행동 로그 인기도가 높음")
+        reasons.extend(personal_reasons[:2])
+        return reasons[:4] or ["검색 조건과 기본 매장 정보가 매칭됨"]
+
+    def _diversified_indices(
+        self,
+        ranked: list[int],
+        combined: list[float],
+        top_k: int,
+        pool_size: int,
+    ) -> list[int]:
+        selected: list[int] = []
+        used_categories: dict[str, int] = {}
+        used_districts: dict[str, int] = {}
+
+        for idx in ranked[:pool_size]:
+            shop = self._shops[idx]
+            main_category = shop.categories[0] if shop.categories else ""
+            district = ""
+            parts = shop.address.split()
+            if len(parts) >= 2:
+                district = parts[1]
+
+            category_count = used_categories.get(main_category, 0)
+            district_count = used_districts.get(district, 0)
+            if len(selected) >= 2 and category_count >= 2 and district_count >= 3:
+                continue
+
+            selected.append(idx)
+            if main_category:
+                used_categories[main_category] = category_count + 1
+            if district:
+                used_districts[district] = district_count + 1
+            if len(selected) >= top_k:
+                break
+
+        if len(selected) < top_k:
+            for idx in ranked:
+                if idx not in selected and combined[idx] > 0:
+                    selected.append(idx)
+                if len(selected) >= top_k:
+                    break
+        return selected
+
+    def recommend(
+        self,
+        query: str,
+        top_k: int = DEFAULT_TOP_K,
+        profile: dict[str, Any] | None = None,
+        feedback: dict[str, str] | None = None,
+        diversify: bool = True,
+    ) -> list[dict]:
         """query로 매장을 추천한다. 결합 스코어 기반 top_k 반환."""
         if not self._loaded or not self._shops:
             return []
@@ -392,20 +531,64 @@ class RecommendationEngine:
         # 3) 전체 인기도
         pop = [self._popularity.get(s.shop_id, 0.0) for s in self._shops]
 
-        # 4) 결합 스코어
-        combined = [
-            0.45 * b + 0.40 * i + 0.15 * p
-            for b, i, p in zip(bm25_norm, intent, pop)
+        # 4) 개인화 점수
+        personal_parts = [
+            self._personal_score(s, profile, feedback)
+            for s in self._shops
+        ]
+        personal = [score for score, _ in personal_parts]
+        has_personal_context = any(personal) or bool(feedback)
+        explicit_regions = [
+            region
+            for region in self._list_profile(profile, "regions")
+            if region and region in str(query)
         ]
 
-        # 5) top_k
+        # 5) 결합 스코어
+        if has_personal_context:
+            combined = [
+                0.35 * b + 0.30 * i + 0.15 * p + 0.20 * ps
+                for b, i, p, ps in zip(bm25_norm, intent, pop, personal)
+            ]
+        else:
+            combined = [
+                0.45 * b + 0.40 * i + 0.15 * p
+                for b, i, p in zip(bm25_norm, intent, pop)
+            ]
+
+        if explicit_regions:
+            region_matches = [
+                any(region.lower() in self._shop_text(shop) for region in explicit_regions)
+                for shop in self._shops
+            ]
+            if not any(region_matches):
+                logger.info("명시 지역에 맞는 매장 없음: %s", ", ".join(explicit_regions))
+                return []
+            combined = [
+                score if region_matches[idx] else score * 0.15
+                for idx, score in enumerate(combined)
+            ]
+
+        # 6) top_k + 다양화
         ranked = sorted(range(n), key=lambda i: combined[i], reverse=True)
+        selected = (
+            self._diversified_indices(ranked, combined, top_k, max(top_k * 8, 20))
+            if diversify
+            else ranked[:top_k]
+        )
         results = []
-        for idx in ranked[:top_k]:
+        for idx in selected:
             score = combined[idx]
             if score <= 0:
                 break
             s = self._shops[idx]
+            personal_reasons = personal_parts[idx][1]
+            score_breakdown = {
+                "bm25": round(bm25_norm[idx], 4),
+                "intent": round(intent[idx], 4),
+                "popularity": round(pop[idx], 4),
+                "personal": round(personal[idx], 4),
+            }
             results.append({
                 "shop_id": s.shop_id,
                 "shop_name": s.shop_name,
@@ -415,6 +598,13 @@ class RecommendationEngine:
                 "facilities": s.facilities[:5],
                 "awards": s.awards,
                 "score": round(score, 4),
+                "score_breakdown": score_breakdown,
+                "reasons": self._score_reasons(
+                    bm25_norm[idx],
+                    intent[idx],
+                    pop[idx],
+                    personal_reasons,
+                ),
             })
 
         return results
