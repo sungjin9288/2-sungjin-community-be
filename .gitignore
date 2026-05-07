@@ -56,3 +56,6 @@ uploads/*
 data/*.csv
 data/chatbot_learning_logs*.jsonl
 data/chatbot_training_samples*.jsonl
+data/recommendation_eval*.json
+data/recommendation_eval*.jsonl
+data/chatbot_rank_weight*.json

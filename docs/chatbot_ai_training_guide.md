@@ -64,6 +64,17 @@ label 규칙:
    - `data/chatbot_training_samples.jsonl`에서 positive/negative label을 기준으로 grid search
    - 목표: NDCG@5, MRR@5 개선
 
+   ```bash
+   python scripts/tune_chatbot_rank_weights.py \
+     --input data/chatbot_training_samples.jsonl \
+     --output data/chatbot_rank_weight_report.json \
+     --top-k 5 \
+     --step 0.1 \
+     --min-groups 3
+   ```
+
+   결과가 `status: "insufficient_data"`이면 query별 positive/negative 후보가 부족한 상태입니다. 추천 카드의 `좋아요`, `저장`, `별로예요` 피드백을 더 수집한 뒤 다시 실행합니다.
+
 2. **Learning-to-Rank 모델**
    - 후보: LightGBM LambdaRank, XGBoost rank:pairwise
    - 입력 피처: `bm25`, `intent`, `popularity`, `personal`, `rank`, `category_count`, `menu_count`
@@ -82,15 +93,19 @@ label 규칙:
 python scripts/evaluate_recommendation.py \
   --max-rows 100000 \
   --max-queries 20 \
-  --top-k 5
+  --top-k 5 \
+  --output data/recommendation_eval_report.json \
+  --details-output data/recommendation_eval_details.jsonl
 ```
+
+요약 리포트는 `NDCG@K`, `MRR@K`, `HitRate@K`, `Coverage@K`, `zero_result_rate`, `avg/p50/p95/max latency`를 포함합니다. query별 상세 JSONL에는 추천된 `shop_id`, 정답 후보 수, query별 latency가 저장됩니다.
 
 운영 전 체크리스트:
 
 - `like/save/dislike` 피드백이 최소 수백 건 이상 쌓였는가
 - `dislike`가 특정 카테고리에 치우치지 않는가
 - 명시 메뉴 질의에서 비관련 카테고리가 상위에 오르지 않는가
-- NDCG@5, MRR@5, 평균 latency를 기존 공식과 비교했는가
+- NDCG@5, MRR@5, HitRate@5, Coverage@5, p95 latency를 기존 공식과 비교했는가
 - 모델 실패 시 공식 기반 fallback이 동작하는가
 
 ## 5. 개인정보 주의

@@ -174,13 +174,26 @@ ChatbotController
 # 710만 행 로그를 사전 집계해 서버 cold start를 줄임
 python scripts/preprocess_logs.py --force
 
-# 샘플 로그 기준 NDCG/MRR/latency 측정
-python scripts/evaluate_recommendation.py --max-rows 100000 --max-queries 20 --top-k 5
+# 샘플 로그 기준 NDCG/MRR/HitRate/Coverage/latency 측정
+python scripts/evaluate_recommendation.py \
+  --max-rows 100000 \
+  --max-queries 20 \
+  --top-k 5 \
+  --output data/recommendation_eval_report.json \
+  --details-output data/recommendation_eval_details.jsonl
 
 # 챗봇 피드백 로그를 랭킹 학습 샘플로 변환
 python scripts/export_chatbot_learning_dataset.py \
   --input data/chatbot_learning_logs.jsonl \
   --output data/chatbot_training_samples.jsonl
+
+# 피드백 학습 샘플로 개인화 랭킹 가중치 실험
+python scripts/tune_chatbot_rank_weights.py \
+  --input data/chatbot_training_samples.jsonl \
+  --output data/chatbot_rank_weight_report.json \
+  --top-k 5 \
+  --step 0.1 \
+  --min-groups 3
 ```
 
 학습 데이터 수집과 모델 고도화 절차는 `docs/chatbot_ai_training_guide.md`를 참고한다.
