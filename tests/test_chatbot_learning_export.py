@@ -19,11 +19,18 @@ def test_export_chatbot_learning_dataset_links_feedback_to_last_recommendation(t
                     "shop_name": "파스타집",
                     "rank": 1,
                     "score": 0.8,
+                    "score_before_adjustments": 0.8,
                     "score_breakdown": {
                         "bm25": 0.7,
                         "intent": 0.9,
                         "popularity": 0.2,
                         "personal": 0.5,
+                    },
+                    "score_contributions": {
+                        "bm25": 0.245,
+                        "intent": 0.27,
+                        "popularity": 0.03,
+                        "personal": 0.1,
                     },
                     "categories": ["파스타"],
                     "menus": ["알리오올리오"],
@@ -54,6 +61,8 @@ def test_export_chatbot_learning_dataset_links_feedback_to_last_recommendation(t
     assert samples[0]["query"] == "강남 파스타 추천해줘"
     assert samples[0]["label"] == 1.0
     assert samples[0]["features"]["bm25"] == 0.7
+    assert samples[0]["features"]["bm25_contribution"] == 0.245
+    assert samples[0]["features"]["score_before_adjustments"] == 0.8
     assert samples[0]["shop"]["categories"] == ["파스타"]
 
 

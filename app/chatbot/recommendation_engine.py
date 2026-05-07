@@ -358,6 +358,18 @@ class RecommendationEngine:
         ]
         return " + ".join(parts) or "0"
 
+    @staticmethod
+    def _score_contributions(
+        weights: dict[str, float],
+        score_breakdown: dict[str, float],
+    ) -> dict[str, float]:
+        """Return each ranking signal's weighted contribution before filters."""
+        return {
+            feature: round(weights.get(feature, 0.0) * score_breakdown.get(feature, 0.0), 4)
+            for feature in RANK_WEIGHT_FEATURES
+            if weights.get(feature, 0.0) > 0
+        }
+
     def _reset_rank_weights(self) -> None:
         self._base_rank_weights = DEFAULT_BASE_RANK_WEIGHTS.copy()
         self._personal_rank_weights = DEFAULT_PERSONAL_RANK_WEIGHTS.copy()
@@ -768,6 +780,10 @@ class RecommendationEngine:
             + weights["personal"] * ps
             for b, i, p, ps in zip(bm25_norm, intent, pop, personal)
         ]
+        region_factors: list[float] | None = None
+        region_matches: list[bool] | None = None
+        cuisine_factors: list[float] | None = None
+        cuisine_matches: list[bool] | None = None
 
         if explicit_regions:
             region_matches = [
@@ -777,8 +793,9 @@ class RecommendationEngine:
             if not any(region_matches):
                 logger.info("명시 지역에 맞는 매장 없음: %s", ", ".join(explicit_regions))
                 return []
+            region_factors = [1.0 if matched else 0.15 for matched in region_matches]
             combined = [
-                score if region_matches[idx] else score * 0.15
+                score * region_factors[idx]
                 for idx, score in enumerate(combined)
             ]
 
@@ -792,8 +809,9 @@ class RecommendationEngine:
                 logger.info("명시 메뉴에 맞는 매장 없음: %s", ", ".join(explicit_cuisines))
                 return []
             penalty = 0.0 if matched_count >= top_k else 0.2
+            cuisine_factors = [1.0 if matched else penalty for matched in cuisine_matches]
             combined = [
-                score if cuisine_matches[idx] else score * penalty
+                score * cuisine_factors[idx]
                 for idx, score in enumerate(combined)
             ]
 
@@ -817,6 +835,22 @@ class RecommendationEngine:
                 "popularity": round(pop[idx], 4),
                 "personal": round(personal[idx], 4),
             }
+            score_contributions = self._score_contributions(weights, score_breakdown)
+            score_adjustments = []
+            if region_factors is not None and region_matches is not None:
+                score_adjustments.append({
+                    "type": "region_filter",
+                    "values": explicit_regions,
+                    "matched": region_matches[idx],
+                    "factor": region_factors[idx],
+                })
+            if cuisine_factors is not None and cuisine_matches is not None:
+                score_adjustments.append({
+                    "type": "cuisine_filter",
+                    "values": explicit_cuisines,
+                    "matched": cuisine_matches[idx],
+                    "factor": cuisine_factors[idx],
+                })
             results.append({
                 "rank": rank,
                 "shop_id": s.shop_id,
@@ -828,6 +862,9 @@ class RecommendationEngine:
                 "awards": s.awards,
                 "score": round(score, 4),
                 "score_breakdown": score_breakdown,
+                "score_contributions": score_contributions,
+                "score_before_adjustments": round(sum(score_contributions.values()), 4),
+                "score_adjustments": score_adjustments,
                 "ranking_formula": ranking_formula,
                 "ranking_weight_source": self._rank_weight_source,
                 "reasons": self._score_reasons(

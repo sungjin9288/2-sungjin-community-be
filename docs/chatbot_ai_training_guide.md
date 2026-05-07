@@ -16,7 +16,7 @@ LLM_PROVIDER=mock \
 
 | 이벤트 | 내용 | 용도 |
 |---|---|---|
-| `chat` | 사용자 질의, 추천 후보, rank, score, score_breakdown, 추천 이유 | 노출 후보와 랭킹 피처 분석 |
+| `chat` | 사용자 질의, 추천 후보, rank, score, score_breakdown, score_contributions, 추천 이유 | 노출 후보와 랭킹 피처 분석 |
 | `feedback` | 좋아요/별로예요/저장, 대상 식당, 당시 프로필 | 학습 label 생성 |
 
 ## 2. 학습 샘플 생성
@@ -62,10 +62,25 @@ label 규칙:
     "bm25": 0.69,
     "intent": 1.0,
     "popularity": 0.18,
-    "personal": 1.0
+    "personal": 1.0,
+    "bm25_contribution": 0.24,
+    "intent_contribution": 0.30,
+    "popularity_contribution": 0.03,
+    "personal_contribution": 0.20
   }
 }
 ```
+
+추천 API의 카드 단위 근거 필드:
+
+| 필드 | 의미 |
+|---|---|
+| `score_breakdown` | BM25, 행동로그, 인기도, 개인취향의 0~1 원천 피처 |
+| `score_contributions` | 현재 적용 중인 랭킹 가중치를 곱한 실제 점수 기여분 |
+| `score_before_adjustments` | 명시 지역/메뉴 필터 보정 전 점수 |
+| `score_adjustments` | 명시 지역/메뉴 조건 불일치 시 적용된 감점 factor |
+| `ranking_formula` | 현재 응답에 사용한 랭킹 공식 |
+| `ranking_weight_source` | 기본 공식 또는 튜닝 artifact 경로 |
 
 ## 3. 첫 학습 전략
 
@@ -125,7 +140,7 @@ label 규칙:
    - 행동 로그 기반 artifact처럼 `personal` 피처가 없으면 기본 추천에는 튜닝 가중치를 적용하고, 개인화 추천에는 기존 개인 취향 20% 비중을 유지
    - `/chatbot/status`의 `recommendation_engine.rank_weights`에서 현재 적용된 가중치, baseline/best metric, promotion 개선폭을 확인
    - 향후 ML 모델 artifact가 있을 때만 Learning-to-Rank 재랭킹 적용
-   - 추천 결과에는 계속 `score_breakdown`과 `reasons`를 노출
+   - 추천 결과에는 계속 `score_breakdown`, `score_contributions`, `score_adjustments`, `reasons`를 노출
 
 ## 4. 평가
 

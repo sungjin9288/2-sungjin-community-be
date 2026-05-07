@@ -71,6 +71,9 @@ def _build_sample(query: str, recommendation: dict[str, Any], label: float) -> d
     breakdown = recommendation.get("score_breakdown")
     if not isinstance(breakdown, dict):
         breakdown = {}
+    contributions = recommendation.get("score_contributions")
+    if not isinstance(contributions, dict):
+        contributions = {}
 
     categories = recommendation.get("categories") or []
     menus = recommendation.get("menus") or []
@@ -82,10 +85,15 @@ def _build_sample(query: str, recommendation: dict[str, Any], label: float) -> d
         "features": {
             "rank": recommendation.get("rank"),
             "score": recommendation.get("score"),
+            "score_before_adjustments": recommendation.get("score_before_adjustments"),
             "bm25": breakdown.get("bm25"),
             "intent": breakdown.get("intent"),
             "popularity": breakdown.get("popularity"),
             "personal": breakdown.get("personal"),
+            "bm25_contribution": contributions.get("bm25"),
+            "intent_contribution": contributions.get("intent"),
+            "popularity_contribution": contributions.get("popularity"),
+            "personal_contribution": contributions.get("personal"),
             "category_count": len(categories),
             "menu_count": len(menus),
         },

@@ -39,8 +39,12 @@ def _compact_shop(shop: dict[str, Any] | None) -> dict[str, Any]:
         "menus": (shop.get("menus") or [])[:5],
         "score": shop.get("score"),
         "score_breakdown": shop.get("score_breakdown") or {},
+        "score_contributions": shop.get("score_contributions") or {},
+        "score_adjustments": shop.get("score_adjustments") or [],
+        "score_before_adjustments": shop.get("score_before_adjustments"),
         "reasons": shop.get("reasons") or [],
         "ranking_formula": shop.get("ranking_formula"),
+        "ranking_weight_source": shop.get("ranking_weight_source"),
         "rank": shop.get("rank"),
     }
 

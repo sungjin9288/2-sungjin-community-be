@@ -9,11 +9,17 @@ def _recommendation(shop_id, *, rank=1, bm25=0.8, intent=0.6):
         "shop_id": shop_id,
         "shop_name": f"shop-{shop_id}",
         "score": 0.7,
+        "score_before_adjustments": 0.7,
         "score_breakdown": {
             "bm25": bm25,
             "intent": intent,
             "popularity": 0.2,
             "personal": 0.0,
+        },
+        "score_contributions": {
+            "bm25": round(0.45 * bm25, 4),
+            "intent": round(0.4 * intent, 4),
+            "popularity": 0.03,
         },
         "categories": ["파스타"],
         "menus": ["토마토 파스타", "라구"],
@@ -36,6 +42,8 @@ def test_build_samples_for_query_uses_behavior_relevance_labels():
     assert samples[0]["label"] == 1.0
     assert samples[0]["source"] == "behavior_log"
     assert samples[0]["features"]["bm25"] == 0.8
+    assert samples[0]["features"]["bm25_contribution"] == 0.36
+    assert samples[0]["features"]["score_before_adjustments"] == 0.7
     assert samples[0]["features"]["category_count"] == 1
     assert samples[1]["label"] == 0.0
 

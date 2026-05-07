@@ -4,6 +4,9 @@ from app.chatbot.recommendation_engine import (
     DEFAULT_BASE_RANK_WEIGHTS,
     DEFAULT_PERSONAL_RANK_WEIGHTS,
     RecommendationEngine,
+    ShopRecord,
+    _build_bm25,
+    _tokenize,
 )
 
 
@@ -135,3 +138,63 @@ def test_recommendation_engine_load_handles_missing_csvs(monkeypatch, tmp_path):
 
     assert engine.is_ready() is False
     assert engine.recommend("강남 파스타") == []
+
+
+def test_recommendation_result_exposes_weighted_score_evidence():
+    engine = RecommendationEngine()
+    engine._shops = [
+        ShopRecord(
+            shop_id="s1",
+            shop_name="성수 파스타 하우스",
+            address="서울 성동구 성수동",
+            categories=["이탈리안", "파스타"],
+            menus=["트러플 파스타"],
+            facilities=["예약"],
+            awards=[],
+        ),
+        ShopRecord(
+            shop_id="s2",
+            shop_name="강남 라멘",
+            address="서울 강남구 역삼동",
+            categories=["라멘"],
+            menus=["돈코츠 라멘"],
+            facilities=[],
+            awards=[],
+        ),
+    ]
+    engine._bm25 = _build_bm25([_tokenize(shop.document_text()) for shop in engine._shops])
+    engine._popularity = {"s1": 0.7, "s2": 0.2}
+    engine._query_token_index = {
+        "성수": {"s1": 0.8, "s2": 0.1},
+        "파스타": {"s1": 0.9},
+    }
+    engine._query_phrase_index = {"성수 파스타": {"s1": 1.0}}
+    engine._loaded = True
+
+    results = engine.recommend(
+        "성수 파스타 추천",
+        top_k=1,
+        profile={"regions": ["성수"], "cuisines": ["파스타"]},
+    )
+
+    assert len(results) == 1
+    shop = results[0]
+    assert shop["shop_id"] == "s1"
+    assert set(shop["score_contributions"]) == {"bm25", "intent", "popularity", "personal"}
+    assert shop["score_before_adjustments"] == round(sum(shop["score_contributions"].values()), 4)
+    assert shop["score"] == shop["score_before_adjustments"]
+    assert shop["score_adjustments"] == [
+        {
+            "type": "region_filter",
+            "values": ["성수"],
+            "matched": True,
+            "factor": 1.0,
+        },
+        {
+            "type": "cuisine_filter",
+            "values": ["파스타"],
+            "matched": True,
+            "factor": 1.0,
+        },
+    ]
+    assert shop["ranking_weight_source"] == "default"

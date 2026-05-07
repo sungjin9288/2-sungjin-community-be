@@ -56,13 +56,19 @@ def _find_recommendation(chat_event: dict[str, Any] | None, shop_id: str) -> dic
 def _build_features(recommendation: dict[str, Any], feedback_shop: dict[str, Any]) -> dict[str, Any]:
     shop = recommendation or feedback_shop
     breakdown = shop.get("score_breakdown") or {}
+    contributions = shop.get("score_contributions") or {}
     return {
         "rank": shop.get("rank"),
         "score": shop.get("score"),
+        "score_before_adjustments": shop.get("score_before_adjustments"),
         "bm25": breakdown.get("bm25"),
         "intent": breakdown.get("intent"),
         "popularity": breakdown.get("popularity"),
         "personal": breakdown.get("personal"),
+        "bm25_contribution": contributions.get("bm25"),
+        "intent_contribution": contributions.get("intent"),
+        "popularity_contribution": contributions.get("popularity"),
+        "personal_contribution": contributions.get("personal"),
         "category_count": len(shop.get("categories") or []),
         "menu_count": len(shop.get("menus") or []),
     }
