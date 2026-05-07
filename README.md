@@ -197,10 +197,20 @@ python scripts/build_recommendation_training_dataset.py \
 # 학습 샘플로 개인화 랭킹 가중치 실험
 python scripts/tune_chatbot_rank_weights.py \
   --input data/recommendation_training_samples.jsonl \
-  --output data/chatbot_rank_weight_report.json \
+  --output data/chatbot_rank_weight_candidate.json \
   --top-k 5 \
   --step 0.1 \
   --min-groups 3
+
+# 기준 성능보다 개선된 후보만 서버 적용 artifact로 승격
+python scripts/promote_chatbot_rank_weights.py \
+  --input data/chatbot_rank_weight_candidate.json \
+  --output data/chatbot_rank_weight_report.json \
+  --decision-output data/chatbot_rank_weight_decision.json \
+  --metric ndcg \
+  --min-samples 100 \
+  --min-groups 3 \
+  --min-improvement 0.0001
 ```
 
 서버는 기본적으로 `data/chatbot_rank_weight_report.json`이 있으면 추천 가중치 artifact로 읽는다. 다른 경로를 쓰려면 `CHATBOT_RANK_WEIGHT_PATH=/path/to/report.json`을 지정한다. artifact가 없거나 `status != "ok"`이면 기존 기본 가중치로 fallback한다.

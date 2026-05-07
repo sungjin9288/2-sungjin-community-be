@@ -79,13 +79,26 @@ label 규칙:
    ```bash
    python scripts/tune_chatbot_rank_weights.py \
      --input data/recommendation_training_samples.jsonl \
-     --output data/chatbot_rank_weight_report.json \
+     --output data/chatbot_rank_weight_candidate.json \
      --top-k 5 \
      --step 0.1 \
      --min-groups 3
    ```
 
    결과가 `status: "insufficient_data"`이면 query별 positive/negative 후보가 부족한 상태입니다. 추천 카드의 `좋아요`, `저장`, `별로예요` 피드백을 더 수집한 뒤 다시 실행합니다. 행동 로그 기반 학습셋처럼 `personal` 값이 모두 0인 피처는 튜닝 대상에서 자동 제외됩니다.
+
+   기준 성능보다 나은 후보만 서버 적용 artifact로 승격합니다.
+
+   ```bash
+   python scripts/promote_chatbot_rank_weights.py \
+     --input data/chatbot_rank_weight_candidate.json \
+     --output data/chatbot_rank_weight_report.json \
+     --decision-output data/chatbot_rank_weight_decision.json \
+     --metric ndcg \
+     --min-samples 100 \
+     --min-groups 3 \
+     --min-improvement 0.0001
+   ```
 
 2. **Learning-to-Rank 모델**
    - 후보: LightGBM LambdaRank, XGBoost rank:pairwise
