@@ -60,6 +60,10 @@ def _record_chat_learning_event(
     return payload
 
 
+def _memory_scope(memory_id: str, session_id: str) -> str:
+    return "user" if memory_id != session_id and memory_id.startswith("user:") else "session"
+
+
 def _starter_questions() -> list[str]:
     return [
         "강남 데이트 파스타 추천해줘",
@@ -73,6 +77,7 @@ def _unsupported_community_payload(
     route: dict[str, Any],
     profile: dict[str, Any],
     summary: str,
+    memory_scope: str,
 ) -> dict[str, Any]:
     return {
         "reply": (
@@ -82,6 +87,7 @@ def _unsupported_community_payload(
         "recommended": [],
         "profile": profile,
         "profile_summary": summary,
+        "memory_scope": memory_scope,
         "clarification": False,
         "next_questions": _starter_questions(),
         "intent": route,
@@ -92,6 +98,7 @@ def _chat_payload(
     user_message: str,
     session_id: str = "default",
     profile: dict[str, Any] | None = None,
+    memory_id: str | None = None,
 ) -> dict[str, Any]:
     """
     사용자 메시지를 받아 챗봇 응답 payload를 만든다.
@@ -100,7 +107,9 @@ def _chat_payload(
     if not user_message:
         raise MissingRequiredFieldsError("메시지를 입력해주세요.")
 
-    stored_profile = personalization_store.get_profile(session_id)
+    memory_id = memory_id or session_id
+    memory_scope = _memory_scope(memory_id, session_id)
+    stored_profile = personalization_store.get_profile(memory_id)
     route_profile = merge_profiles(stored_profile, profile)
     route = classify_chat_intent(user_message, route_profile)
     route_payload = route.to_dict()
@@ -127,6 +136,7 @@ def _chat_payload(
                 "recommended": [],
                 "profile": route_profile,
                 "profile_summary": summary,
+                "memory_scope": memory_scope,
                 "clarification": False,
                 "next_questions": _starter_questions(),
                 "intent": route_payload,
@@ -142,6 +152,7 @@ def _chat_payload(
                 route=route_payload,
                 profile=route_profile,
                 summary=summary,
+                memory_scope=memory_scope,
             ),
         )
 
@@ -161,6 +172,7 @@ def _chat_payload(
                 "recommended": [],
                 "profile": route_profile,
                 "profile_summary": summary,
+                "memory_scope": memory_scope,
                 "clarification": False,
                 "next_questions": _starter_questions(),
                 "intent": route_payload,
@@ -169,7 +181,7 @@ def _chat_payload(
 
     current_profile = extract_preferences(user_message)
     merged_profile = personalization_store.update_from_message(
-        session_id=session_id,
+        session_id=memory_id,
         message=user_message,
         client_profile=profile,
     )
@@ -196,6 +208,7 @@ def _chat_payload(
                 "recommended": [],
                 "profile": merged_profile,
                 "profile_summary": summary,
+                "memory_scope": memory_scope,
                 "clarification": True,
                 "next_questions": clarification_suggestions(
                     merged_profile,
@@ -214,7 +227,7 @@ def _chat_payload(
                 recommend_query,
                 top_k=RECOMMEND_TOP_K,
                 profile=merged_profile,
-                feedback=personalization_store.get_feedback(session_id),
+                feedback=personalization_store.get_feedback(memory_id),
                 diversify=True,
             )
         except Exception as exc:
@@ -242,6 +255,7 @@ def _chat_payload(
             "recommended": recommended,
             "profile": merged_profile,
             "profile_summary": summary,
+            "memory_scope": memory_scope,
             "clarification": False,
             "next_questions": [
                 "더 저렴한 곳으로 다시 추천해줘",
@@ -257,31 +271,38 @@ def chat(
     user_message: str,
     session_id: str = "default",
     profile: dict[str, Any] | None = None,
+    memory_id: str | None = None,
 ) -> JSONResponse:
     """
     사용자 메시지를 받아 챗봇 응답과 추천 식당 목록을 반환한다.
     """
     return ok(
         message="chat_success",
-        data=_chat_payload(user_message, session_id, profile),
+        data=_chat_payload(user_message, session_id, profile, memory_id),
     )
 
 
-def reset_session(session_id: str = "default") -> JSONResponse:
+def reset_session(session_id: str = "default", memory_id: str | None = None) -> JSONResponse:
     """대화 기록 초기화."""
+    memory_id = memory_id or session_id
     chatbot_chain.reset_memory(session_id)
-    personalization_store.reset(session_id)
-    return ok(message="session_reset", data=None)
+    personalization_store.reset(memory_id)
+    return ok(
+        message="session_reset",
+        data={"memory_scope": _memory_scope(memory_id, session_id)},
+    )
 
 
-def get_profile(session_id: str = "default") -> JSONResponse:
-    profile = personalization_store.get_profile(session_id)
+def get_profile(session_id: str = "default", memory_id: str | None = None) -> JSONResponse:
+    memory_id = memory_id or session_id
+    profile = personalization_store.get_profile(memory_id)
     return ok(
         message="profile_loaded",
         data={
             "profile": profile,
             "profile_summary": profile_summary(profile),
             "storage": personalization_store.backend,
+            "memory_scope": _memory_scope(memory_id, session_id),
         },
     )
 
@@ -291,8 +312,11 @@ def record_feedback(
     shop_id: str,
     action: str,
     shop: dict[str, Any] | None = None,
+    memory_id: str | None = None,
 ) -> JSONResponse:
-    result = personalization_store.record_feedback(session_id, shop_id, action, shop)
+    memory_id = memory_id or session_id
+    result = personalization_store.record_feedback(memory_id, shop_id, action, shop)
+    result["memory_scope"] = _memory_scope(memory_id, session_id)
     learning_log_writer.record_feedback(
         session_id=session_id,
         shop_id=shop_id,
@@ -309,9 +333,10 @@ def chat_stream(
     user_message: str,
     session_id: str = "default",
     profile: dict[str, Any] | None = None,
+    memory_id: str | None = None,
 ) -> StreamingResponse:
     async def event_generator():
-        payload = _chat_payload(user_message, session_id, profile)
+        payload = _chat_payload(user_message, session_id, profile, memory_id)
         reply = str(payload.get("reply") or "")
         for token in reply.split(" "):
             if token:

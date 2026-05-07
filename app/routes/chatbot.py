@@ -14,7 +14,7 @@ GET  /chatbot/status    — 엔진/챗봇 초기화 상태 확인
 import re
 from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
 
 from app.chatbot import chatbot_controller
@@ -22,6 +22,7 @@ from app.chatbot.chatbot_chain import chatbot_chain
 from app.chatbot.intent_router import supported_features
 from app.chatbot.personalization import personalization_store
 from app.chatbot.recommendation_engine import recommendation_engine
+from app.common.auth import get_user_id_from_request
 from app.common.responses import ok
 
 router = APIRouter(prefix="/chatbot", tags=["chatbot"])
@@ -64,8 +65,13 @@ def _resolve_session_id(value: str | None) -> str:
     return session_id
 
 
+def _resolve_memory_id(request: Request, session_id: str) -> str:
+    user_id = get_user_id_from_request(request)
+    return f"user:{user_id}" if user_id else session_id
+
+
 @router.post("/chat")
-def chat(payload: ChatRequest):
+def chat(payload: ChatRequest, request: Request):
     """
     식당 추천 챗봇에 메시지를 전송합니다.
 
@@ -77,29 +83,34 @@ def chat(payload: ChatRequest):
         user_message=payload.message,
         session_id=session_id,
         profile=payload.profile,
+        memory_id=_resolve_memory_id(request, session_id),
     )
 
 
 @router.post("/chat/stream")
-def chat_stream(payload: ChatRequest):
+def chat_stream(payload: ChatRequest, request: Request):
     """식당 추천 챗봇 응답을 SSE 형태로 전송합니다."""
     session_id = _resolve_session_id(payload.session_id)
     return chatbot_controller.chat_stream(
         user_message=payload.message,
         session_id=session_id,
         profile=payload.profile,
+        memory_id=_resolve_memory_id(request, session_id),
     )
 
 
 @router.post("/reset")
-def reset_session(payload: ResetRequest | None = None):
+def reset_session(request: Request, payload: ResetRequest | None = None):
     """대화 기록(메모리)을 초기화합니다."""
     session_id = _resolve_session_id(payload.session_id if payload else None)
-    return chatbot_controller.reset_session(session_id)
+    return chatbot_controller.reset_session(
+        session_id,
+        memory_id=_resolve_memory_id(request, session_id),
+    )
 
 
 @router.post("/feedback")
-def record_feedback(payload: FeedbackRequest):
+def record_feedback(payload: FeedbackRequest, request: Request):
     """추천 카드에 대한 좋아요/별로/저장 피드백을 기록합니다."""
     session_id = _resolve_session_id(payload.session_id)
     return chatbot_controller.record_feedback(
@@ -107,14 +118,18 @@ def record_feedback(payload: FeedbackRequest):
         shop_id=payload.shop_id,
         action=payload.action,
         shop=payload.shop,
+        memory_id=_resolve_memory_id(request, session_id),
     )
 
 
 @router.get("/profile")
-def get_profile(session_id: str | None = Query(None, max_length=128)):
+def get_profile(request: Request, session_id: str | None = Query(None, max_length=128)):
     """세션에 저장된 챗봇 장기 취향 프로필을 반환합니다."""
     resolved_session_id = _resolve_session_id(session_id)
-    return chatbot_controller.get_profile(resolved_session_id)
+    return chatbot_controller.get_profile(
+        resolved_session_id,
+        memory_id=_resolve_memory_id(request, resolved_session_id),
+    )
 
 
 @router.get("/status")

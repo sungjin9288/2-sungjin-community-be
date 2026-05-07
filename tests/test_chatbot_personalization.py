@@ -5,6 +5,25 @@ from app.db_models import ChatbotMemory
 from app.database import SessionLocal
 
 
+def _auth_header(access_token: str) -> dict:
+    return {"Authorization": f"Bearer {access_token}"}
+
+
+def _signup_and_login(client, email: str, password: str, nickname: str) -> dict:
+    signup_res = client.post(
+        "/auth/signup",
+        json={"email": email, "password": password, "nickname": nickname},
+    )
+    assert signup_res.status_code == 201
+
+    login_res = client.post(
+        "/auth/login",
+        json={"email": email, "password": password},
+    )
+    assert login_res.status_code == 200
+    return login_res.json()["data"]
+
+
 def test_chatbot_clarifies_broad_food_request(client):
     res = client.post(
         "/chatbot/chat",
@@ -369,3 +388,94 @@ def test_chatbot_profile_persists_in_database(client):
     profile_after_reset = client.get("/chatbot/profile", params={"session_id": session_id})
     assert profile_after_reset.status_code == 200
     assert profile_after_reset.json()["data"]["profile"]["regions"] == []
+
+
+def test_chatbot_profile_follows_authenticated_user_across_sessions(
+    client,
+    unique_email,
+    unique_nickname,
+):
+    password = "Abcd1234!"
+    tokens = _signup_and_login(
+        client,
+        unique_email("chatbot-account"),
+        password,
+        unique_nickname("ca"),
+    )
+    headers = _auth_header(tokens["access_token"])
+    me_res = client.get("/users/me", headers=headers)
+    assert me_res.status_code == 200
+    user_id = me_res.json()["data"]["id"]
+
+    first_session = "pytest_account_profile_first"
+    second_session = "pytest_account_profile_second"
+    chat_res = client.post(
+        "/chatbot/chat",
+        headers=headers,
+        json={
+            "message": "강남 데이트 파스타 맛집 추천해줘",
+            "session_id": first_session,
+        },
+    )
+    assert chat_res.status_code == 200
+    assert chat_res.json()["data"]["memory_scope"] == "user"
+
+    db = SessionLocal()
+    try:
+        user_memory = db.query(ChatbotMemory).filter(ChatbotMemory.session_id == f"user:{user_id}").first()
+        session_memory = db.query(ChatbotMemory).filter(ChatbotMemory.session_id == first_session).first()
+        assert user_memory is not None
+        assert session_memory is None
+    finally:
+        db.close()
+
+    personalization_store._sessions.clear()
+    profile_res = client.get(
+        "/chatbot/profile",
+        headers=headers,
+        params={"session_id": second_session},
+    )
+    assert profile_res.status_code == 200
+    profile_payload = profile_res.json()["data"]
+    assert profile_payload["memory_scope"] == "user"
+    assert "강남" in profile_payload["profile"]["regions"]
+    assert "파스타" in profile_payload["profile"]["cuisines"]
+
+    anon_profile_res = client.get("/chatbot/profile", params={"session_id": second_session})
+    assert anon_profile_res.status_code == 200
+    anon_payload = anon_profile_res.json()["data"]
+    assert anon_payload["memory_scope"] == "session"
+    assert anon_payload["profile"]["regions"] == []
+
+    other_tokens = _signup_and_login(
+        client,
+        unique_email("chatbot-other"),
+        password,
+        unique_nickname("co"),
+    )
+    other_profile_res = client.get(
+        "/chatbot/profile",
+        headers=_auth_header(other_tokens["access_token"]),
+        params={"session_id": second_session},
+    )
+    assert other_profile_res.status_code == 200
+    other_payload = other_profile_res.json()["data"]
+    assert other_payload["memory_scope"] == "user"
+    assert other_payload["profile"]["regions"] == []
+
+    reset_res = client.post(
+        "/chatbot/reset",
+        headers=headers,
+        json={"session_id": second_session},
+    )
+    assert reset_res.status_code == 200
+    assert reset_res.json()["data"]["memory_scope"] == "user"
+
+    personalization_store._sessions.clear()
+    after_reset_res = client.get(
+        "/chatbot/profile",
+        headers=headers,
+        params={"session_id": first_session},
+    )
+    assert after_reset_res.status_code == 200
+    assert after_reset_res.json()["data"]["profile"]["regions"] == []
