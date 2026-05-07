@@ -16,6 +16,7 @@ BM25 기반 식당 검색 + 사용자 행동 로그 기반 랭킹 엔진.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import pickle
@@ -38,6 +39,21 @@ EVENT_WEIGHTS: dict[str, float] = {
 }
 DEFAULT_TOP_K = 5
 LOG_CACHE_VERSION = 2
+RANK_WEIGHT_ARTIFACT_ENV = "CHATBOT_RANK_WEIGHT_PATH"
+DEFAULT_RANK_WEIGHT_ARTIFACT_PATH = "data/chatbot_rank_weight_report.json"
+RANK_WEIGHT_FEATURES = ("bm25", "intent", "popularity", "personal")
+DEFAULT_BASE_RANK_WEIGHTS: dict[str, float] = {
+    "bm25": 0.45,
+    "intent": 0.40,
+    "popularity": 0.15,
+    "personal": 0.0,
+}
+DEFAULT_PERSONAL_RANK_WEIGHTS: dict[str, float] = {
+    "bm25": 0.35,
+    "intent": 0.30,
+    "popularity": 0.15,
+    "personal": 0.20,
+}
 CUISINE_ALIASES: dict[str, tuple[str, ...]] = {
     "파스타": ("파스타", "이탈리아", "이탈리안"),
     "이탈리아": ("이탈리아", "이탈리안", "파스타", "피자"),
@@ -250,6 +266,9 @@ class RecommendationEngine:
         self._popularity: dict[str, float] = {}
         self._query_token_index: dict[str, dict[str, float]] = {}
         self._query_phrase_index: dict[str, dict[str, float]] = {}
+        self._base_rank_weights = DEFAULT_BASE_RANK_WEIGHTS.copy()
+        self._personal_rank_weights = DEFAULT_PERSONAL_RANK_WEIGHTS.copy()
+        self._rank_weight_source = "default"
         self._loaded = False
 
     def load(
@@ -260,12 +279,14 @@ class RecommendationEngine:
         shops_path = shops_path or os.getenv("SHOPS_CSV_PATH", "data/shops.csv")
         logs_path = logs_path or os.getenv("LOGS_CSV_PATH", "data/logs.csv")
         cache_path = os.getenv("LOG_CACHE_PATH", "data/log_cache.pkl")
+        rank_weight_path = os.getenv(RANK_WEIGHT_ARTIFACT_ENV, DEFAULT_RANK_WEIGHT_ARTIFACT_PATH)
+        self._load_rank_weight_artifact(rank_weight_path)
 
         shops_df = self._safe_read_csv(shops_path, "shops")
 
         self._shops = self._parse_shops(shops_df)
         corpus = [_tokenize(s.document_text()) for s in self._shops]
-        self._bm25 = _build_bm25(corpus)
+        self._bm25 = _build_bm25(corpus or [["__empty__"]])
 
         if self._load_log_cache(cache_path):
             self._loaded = True
@@ -290,6 +311,150 @@ class RecommendationEngine:
         self._popularity = _build_popularity_index(events)
         self._query_token_index = _build_query_token_index(events)
         self._query_phrase_index = _build_query_phrase_index(events)
+
+    @staticmethod
+    def _safe_weight(value: Any) -> float:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return 0.0
+        if pd.isna(number) or number < 0:
+            return 0.0
+        return number
+
+    @classmethod
+    def _normalise_rank_weights(
+        cls,
+        weights: dict[str, Any],
+        active_features: tuple[str, ...],
+        fallback: dict[str, float],
+    ) -> dict[str, float]:
+        cleaned = {
+            feature: cls._safe_weight(weights.get(feature))
+            for feature in RANK_WEIGHT_FEATURES
+        }
+        total = sum(cleaned[feature] for feature in active_features)
+        if total <= 0:
+            return fallback.copy()
+        return {
+            feature: round(cleaned[feature] / total, 6) if feature in active_features else 0.0
+            for feature in RANK_WEIGHT_FEATURES
+        }
+
+    @staticmethod
+    def _format_rank_formula(weights: dict[str, float]) -> str:
+        labels = {
+            "bm25": "search_match",
+            "intent": "intent_log",
+            "popularity": "popularity",
+            "personal": "personal_preference",
+        }
+        parts = [
+            f"{weights.get(feature, 0.0):.2f}*{labels[feature]}"
+            for feature in RANK_WEIGHT_FEATURES
+            if weights.get(feature, 0.0) > 0
+        ]
+        return " + ".join(parts) or "0"
+
+    def _reset_rank_weights(self) -> None:
+        self._base_rank_weights = DEFAULT_BASE_RANK_WEIGHTS.copy()
+        self._personal_rank_weights = DEFAULT_PERSONAL_RANK_WEIGHTS.copy()
+        self._rank_weight_source = "default"
+
+    def _apply_rank_weights(
+        self,
+        weights: dict[str, Any],
+        *,
+        active_features: list[str] | tuple[str, ...] | None = None,
+        source: str,
+    ) -> bool:
+        active = tuple(
+            feature
+            for feature in (active_features or [])
+            if feature in RANK_WEIGHT_FEATURES
+        )
+        if not active:
+            active = tuple(
+                feature
+                for feature in RANK_WEIGHT_FEATURES
+                if self._safe_weight(weights.get(feature)) > 0
+            )
+        if not active:
+            return False
+
+        base_features = tuple(feature for feature in active if feature != "personal")
+        self._base_rank_weights = self._normalise_rank_weights(
+            weights,
+            base_features,
+            DEFAULT_BASE_RANK_WEIGHTS,
+        )
+
+        if "personal" in active:
+            self._personal_rank_weights = self._normalise_rank_weights(
+                weights,
+                active,
+                DEFAULT_PERSONAL_RANK_WEIGHTS,
+            )
+        else:
+            personal_budget = DEFAULT_PERSONAL_RANK_WEIGHTS["personal"]
+            non_personal = self._normalise_rank_weights(
+                weights,
+                base_features,
+                DEFAULT_BASE_RANK_WEIGHTS,
+            )
+            self._personal_rank_weights = {
+                feature: round(non_personal[feature] * (1.0 - personal_budget), 6)
+                for feature in RANK_WEIGHT_FEATURES
+            }
+            self._personal_rank_weights["personal"] = personal_budget
+
+        self._rank_weight_source = source
+        return True
+
+    def _load_rank_weight_artifact(self, path: str) -> bool:
+        self._reset_rank_weights()
+        if not path:
+            return False
+
+        p = Path(path)
+        if not p.exists():
+            logger.info("랭킹 가중치 artifact 없음: %s", path)
+            return False
+
+        try:
+            payload = json.loads(p.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning("랭킹 가중치 artifact 로드 실패, 기본값 사용: %s", exc)
+            return False
+
+        if not isinstance(payload, dict) or payload.get("status") != "ok":
+            logger.warning("랭킹 가중치 artifact 비활성 상태, 기본값 사용: %s", path)
+            return False
+
+        weights = payload.get("best_weights")
+        if not isinstance(weights, dict):
+            logger.warning("랭킹 가중치 artifact best_weights 없음, 기본값 사용: %s", path)
+            return False
+
+        active_features = payload.get("active_features")
+        if not isinstance(active_features, list):
+            active_features = []
+
+        applied = self._apply_rank_weights(
+            weights,
+            active_features=active_features,
+            source=str(p),
+        )
+        if applied:
+            logger.info(
+                "랭킹 가중치 artifact 적용: %s (base=%s, personal=%s)",
+                path,
+                self._base_rank_weights,
+                self._personal_rank_weights,
+            )
+        else:
+            logger.warning("랭킹 가중치 artifact 적용 실패, 기본값 사용: %s", path)
+        return applied
 
     def _load_log_cache(self, path: str) -> bool:
         p = Path(path)
@@ -567,18 +732,15 @@ class RecommendationEngine:
         ]
 
         # 5) 결합 스코어
-        if has_personal_context:
-            ranking_formula = "0.35*search_match + 0.30*intent_log + 0.15*popularity + 0.20*personal_preference"
-            combined = [
-                0.35 * b + 0.30 * i + 0.15 * p + 0.20 * ps
-                for b, i, p, ps in zip(bm25_norm, intent, pop, personal)
-            ]
-        else:
-            ranking_formula = "0.45*search_match + 0.40*intent_log + 0.15*popularity"
-            combined = [
-                0.45 * b + 0.40 * i + 0.15 * p
-                for b, i, p in zip(bm25_norm, intent, pop)
-            ]
+        weights = self._personal_rank_weights if has_personal_context else self._base_rank_weights
+        ranking_formula = self._format_rank_formula(weights)
+        combined = [
+            weights["bm25"] * b
+            + weights["intent"] * i
+            + weights["popularity"] * p
+            + weights["personal"] * ps
+            for b, i, p, ps in zip(bm25_norm, intent, pop, personal)
+        ]
 
         if explicit_regions:
             region_matches = [
@@ -640,6 +802,7 @@ class RecommendationEngine:
                 "score": round(score, 4),
                 "score_breakdown": score_breakdown,
                 "ranking_formula": ranking_formula,
+                "ranking_weight_source": self._rank_weight_source,
                 "reasons": self._score_reasons(
                     bm25_norm[idx],
                     intent[idx],
@@ -656,6 +819,10 @@ class RecommendationEngine:
     @property
     def shop_count(self) -> int:
         return len(self._shops)
+
+    @property
+    def rank_weight_source(self) -> str:
+        return self._rank_weight_source
 
 
 # 싱글턴

@@ -93,8 +93,10 @@ label 규칙:
    - 그룹 기준: `query` 또는 `session_id + query`
 
 3. **서빙 적용**
-   - 모델 artifact가 있을 때만 ML 재랭킹 적용
-   - artifact가 없거나 예측 실패 시 기존 공식 랭킹으로 fallback
+   - `data/chatbot_rank_weight_report.json` 또는 `CHATBOT_RANK_WEIGHT_PATH`의 가중치 artifact를 런타임에 적용
+   - artifact가 없거나 `status != "ok"`이면 기존 공식 랭킹으로 fallback
+   - 행동 로그 기반 artifact처럼 `personal` 피처가 없으면 기본 추천에는 튜닝 가중치를 적용하고, 개인화 추천에는 기존 개인 취향 20% 비중을 유지
+   - 향후 ML 모델 artifact가 있을 때만 Learning-to-Rank 재랭킹 적용
    - 추천 결과에는 계속 `score_breakdown`과 `reasons`를 노출
 
 ## 4. 평가

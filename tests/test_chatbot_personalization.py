@@ -40,6 +40,15 @@ def test_chatbot_clarifies_broad_food_request(client):
     assert "지역" in payload["reply"] or "메뉴" in payload["reply"]
 
 
+def test_chatbot_status_exposes_rank_weight_source(client):
+    res = client.get("/chatbot/status")
+
+    assert res.status_code == 200
+    engine_status = res.json()["data"]["recommendation_engine"]
+    assert "rank_weight_source" in engine_status
+    assert isinstance(engine_status["rank_weight_source"], str)
+
+
 def test_chatbot_clarifies_region_only_request(client):
     res = client.post(
         "/chatbot/chat",

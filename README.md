@@ -203,6 +203,8 @@ python scripts/tune_chatbot_rank_weights.py \
   --min-groups 3
 ```
 
+서버는 기본적으로 `data/chatbot_rank_weight_report.json`이 있으면 추천 가중치 artifact로 읽는다. 다른 경로를 쓰려면 `CHATBOT_RANK_WEIGHT_PATH=/path/to/report.json`을 지정한다. artifact가 없거나 `status != "ok"`이면 기존 기본 가중치로 fallback한다.
+
 학습 데이터 수집과 모델 고도화 절차는 `docs/chatbot_ai_training_guide.md`를 참고한다.
 
 ### LLM 설정
