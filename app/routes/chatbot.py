@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from app.chatbot import chatbot_controller
 from app.chatbot.chatbot_chain import chatbot_chain
+from app.chatbot.intent_router import supported_features
 from app.chatbot.personalization import personalization_store
 from app.chatbot.recommendation_engine import recommendation_engine
 from app.common.responses import ok
@@ -134,6 +135,7 @@ def get_status():
                 "provider": chatbot_chain._provider,
                 "initialized": chatbot_chain._initialized,
                 "personalization": personalization_store.stats(),
+                "supported_features": supported_features(),
             },
         },
     )

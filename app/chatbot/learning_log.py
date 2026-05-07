@@ -76,6 +76,7 @@ class LearningLogWriter:
         profile_summary: str,
         clarification: bool,
         next_questions: list[str],
+        intent: dict[str, Any] | None = None,
     ) -> None:
         self.write(
             "chat",
@@ -83,6 +84,7 @@ class LearningLogWriter:
                 "session_id": session_id,
                 "message": message,
                 "reply": reply,
+                "intent": intent or {},
                 "profile": profile,
                 "profile_summary": profile_summary,
                 "clarification": clarification,

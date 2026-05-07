@@ -20,12 +20,13 @@ from typing import Any
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.chatbot.chatbot_chain import chatbot_chain
+from app.chatbot.intent_router import classify_chat_intent
 from app.chatbot.learning_log import learning_log_writer
 from app.chatbot.personalization import (
     clarification_suggestions,
     clarification_question,
     extract_preferences,
-    is_food_related,
+    merge_profiles,
     personalization_store,
     profile_summary,
     should_ask_clarification,
@@ -54,8 +55,37 @@ def _record_chat_learning_event(
         profile_summary=str(payload.get("profile_summary") or ""),
         clarification=bool(payload.get("clarification")),
         next_questions=payload.get("next_questions") or [],
+        intent=payload.get("intent") or {},
     )
     return payload
+
+
+def _starter_questions() -> list[str]:
+    return [
+        "강남 데이트 파스타 추천해줘",
+        "강남 회식 고기집 추천해줘",
+        "라면 맛집 추천해줘",
+    ]
+
+
+def _unsupported_community_payload(
+    *,
+    route: dict[str, Any],
+    profile: dict[str, Any],
+    summary: str,
+) -> dict[str, Any]:
+    return {
+        "reply": (
+            "커뮤니티 글 검색, 북마크, 알림 요약은 챗봇 기능으로 분리해 둘 수 있지만 "
+            "아직 API 도구 연결 전입니다. 현재 바로 사용할 수 있는 기능은 행동 로그 기반 식당 추천입니다."
+        ),
+        "recommended": [],
+        "profile": profile,
+        "profile_summary": summary,
+        "clarification": False,
+        "next_questions": _starter_questions(),
+        "intent": route,
+    }
 
 
 def _chat_payload(
@@ -70,11 +100,53 @@ def _chat_payload(
     if not user_message:
         raise MissingRequiredFieldsError("메시지를 입력해주세요.")
 
-    logger.info("챗봇 요청 (session=%s): %r", session_id, user_message[:80])
+    stored_profile = personalization_store.get_profile(session_id)
+    route_profile = merge_profiles(stored_profile, profile)
+    route = classify_chat_intent(user_message, route_profile)
+    route_payload = route.to_dict()
 
-    if not is_food_related(user_message):
-        stored_profile = personalization_store.get_profile(session_id)
-        summary = profile_summary(stored_profile)
+    logger.info(
+        "챗봇 요청 (session=%s, intent=%s): %r",
+        session_id,
+        route.name,
+        user_message[:80],
+    )
+
+    if route.name == "preference_profile":
+        summary = profile_summary(route_profile)
+        reply = (
+            f"현재 기억한 취향은 {summary}입니다."
+            if summary != "아직 저장된 취향이 없습니다."
+            else "아직 저장된 취향이 없습니다. 지역, 메뉴, 상황을 말해주면 취향 프로필에 반영할게요."
+        )
+        return _record_chat_learning_event(
+            session_id=session_id,
+            user_message=user_message,
+            payload={
+                "reply": reply,
+                "recommended": [],
+                "profile": route_profile,
+                "profile_summary": summary,
+                "clarification": False,
+                "next_questions": _starter_questions(),
+                "intent": route_payload,
+            },
+        )
+
+    if route.name == "community_assistant":
+        summary = profile_summary(route_profile)
+        return _record_chat_learning_event(
+            session_id=session_id,
+            user_message=user_message,
+            payload=_unsupported_community_payload(
+                route=route_payload,
+                profile=route_profile,
+                summary=summary,
+            ),
+        )
+
+    if route.name != "restaurant_recommendation":
+        summary = profile_summary(route_profile)
         reply = chatbot_chain.chat(
             user_message=user_message,
             recommended_shops=[],
@@ -87,14 +159,11 @@ def _chat_payload(
             payload={
                 "reply": reply,
                 "recommended": [],
-                "profile": stored_profile,
+                "profile": route_profile,
                 "profile_summary": summary,
                 "clarification": False,
-                "next_questions": [
-                    "강남 데이트 파스타 추천해줘",
-                    "강남 회식 고기집 추천해줘",
-                    "라면 맛집 추천해줘",
-                ],
+                "next_questions": _starter_questions(),
+                "intent": route_payload,
             },
         )
 
@@ -105,6 +174,9 @@ def _chat_payload(
         client_profile=profile,
     )
     summary = profile_summary(merged_profile)
+    recommend_query = user_message
+    if route.reason == "saved_profile_recommendation":
+        recommend_query = f"{user_message} {summary}"
 
     if should_ask_clarification(
         user_message,
@@ -130,6 +202,7 @@ def _chat_payload(
                     message=user_message,
                     current_profile=current_profile,
                 ),
+                "intent": route_payload,
             },
         )
 
@@ -138,7 +211,7 @@ def _chat_payload(
     if recommendation_engine.is_ready():
         try:
             recommended = recommendation_engine.recommend(
-                user_message,
+                recommend_query,
                 top_k=RECOMMEND_TOP_K,
                 profile=merged_profile,
                 feedback=personalization_store.get_feedback(session_id),
@@ -150,7 +223,7 @@ def _chat_payload(
     # LLM 응답 생성
     try:
         reply = chatbot_chain.chat(
-            user_message=user_message,
+            user_message=recommend_query,
             recommended_shops=recommended,
             session_id=session_id,
             preference_summary=summary,
@@ -175,6 +248,7 @@ def _chat_payload(
                 "비슷하지만 분위기 좋은 곳으로 바꿔줘",
                 "저장한 취향 기준으로 다시 골라줘",
             ],
+            "intent": route_payload,
         },
     )
 

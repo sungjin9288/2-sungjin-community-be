@@ -90,6 +90,108 @@ def test_chatbot_rejects_out_of_scope_stock_request(client):
     assert payload["recommended"] == []
     assert "식당 추천 봇" in payload["reply"]
     assert payload["profile"]["regions"] == []
+    assert payload["intent"]["name"] == "out_of_scope"
+
+
+def test_chatbot_routes_planned_community_feature_without_recommendations(client):
+    res = client.post(
+        "/chatbot/chat",
+        json={
+            "message": "내 북마크랑 알림 요약해줘",
+            "session_id": "pytest_chatbot_community_intent",
+        },
+    )
+
+    assert res.status_code == 200
+    payload = res.json()["data"]
+    assert payload["recommended"] == []
+    assert payload["intent"]["name"] == "community_assistant"
+    assert payload["intent"]["supported"] is False
+    assert "식당 추천" in payload["reply"]
+
+
+def test_chatbot_can_show_saved_preference_profile(client):
+    session_id = "pytest_chatbot_profile_summary_intent"
+    chat_res = client.post(
+        "/chatbot/chat",
+        json={
+            "message": "강남 데이트 파스타 맛집 추천해줘",
+            "session_id": session_id,
+        },
+    )
+    assert chat_res.status_code == 200
+
+    profile_res = client.post(
+        "/chatbot/chat",
+        json={
+            "message": "내 취향 보여줘",
+            "session_id": session_id,
+        },
+    )
+
+    assert profile_res.status_code == 200
+    payload = profile_res.json()["data"]
+    assert payload["recommended"] == []
+    assert payload["intent"]["name"] == "preference_profile"
+    assert "강남" in payload["reply"]
+    assert "파스타" in payload["reply"]
+
+    reset_res = client.post("/chatbot/reset", json={"session_id": session_id})
+    assert reset_res.status_code == 200
+
+
+def test_chatbot_uses_saved_profile_for_followup_recommendation(client):
+    session_id = "pytest_chatbot_saved_profile_followup"
+    first_res = client.post(
+        "/chatbot/chat",
+        json={
+            "message": "강남 데이트 파스타 맛집 추천해줘",
+            "session_id": session_id,
+        },
+    )
+    assert first_res.status_code == 200
+
+    followup_res = client.post(
+        "/chatbot/chat",
+        json={
+            "message": "저장한 취향 기준으로 다시 골라줘",
+            "session_id": session_id,
+        },
+    )
+
+    assert followup_res.status_code == 200
+    payload = followup_res.json()["data"]
+    assert payload["intent"]["name"] == "restaurant_recommendation"
+    assert payload["intent"]["reason"] == "saved_profile_recommendation"
+    assert payload["clarification"] is False
+    assert isinstance(payload["recommended"], list)
+    assert "식당 추천 봇" not in payload["reply"]
+
+    reset_res = client.post("/chatbot/reset", json={"session_id": session_id})
+    assert reset_res.status_code == 200
+
+
+def test_chatbot_uses_client_profile_for_saved_profile_followup(client):
+    res = client.post(
+        "/chatbot/chat",
+        json={
+            "message": "저장한 취향 기준으로 다시 골라줘",
+            "session_id": "pytest_chatbot_client_profile_followup",
+            "profile": {
+                "regions": ["강남"],
+                "cuisines": ["파스타"],
+                "situations": ["데이트"],
+            },
+        },
+    )
+
+    assert res.status_code == 200
+    payload = res.json()["data"]
+    assert payload["intent"]["name"] == "restaurant_recommendation"
+    assert payload["intent"]["reason"] == "saved_profile_recommendation"
+    assert "강남" in payload["profile"]["regions"]
+    assert "파스타" in payload["profile"]["cuisines"]
+    assert "식당 추천 봇" not in payload["reply"]
 
 
 def test_chatbot_does_not_extract_sashimi_from_hwesik(client):
@@ -223,6 +325,7 @@ def test_chatbot_writes_learning_log_for_chat_and_feedback(client, tmp_path, mon
     )
 
     assert chat_event["message"] == "강남 데이트 파스타 맛집 추천해줘"
+    assert chat_event["intent"]["name"] == "restaurant_recommendation"
     assert "profile" in chat_event
     assert isinstance(chat_event["recommendations"], list)
     assert feedback_event["action"] == "like"

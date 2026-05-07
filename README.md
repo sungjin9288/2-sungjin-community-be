@@ -142,6 +142,7 @@ This backend repository owns the following responsibilities:
 POST /chatbot/chat
     ↓
 ChatbotController
+    ├── IntentRouter            (식당 추천 / 취향 프로필 / 계획된 커뮤니티 기능 분기)
     ├── PersonalizationStore   (DB-backed long-term preference memory)
     ├── RecommendationEngine   (BM25 + 행동 로그 + 개인화 랭킹)
     │     ├── kiwipiepy 형태소 분석
@@ -162,6 +163,7 @@ ChatbotController
 - **결합 스코어**: `0.45 × BM25 + 0.40 × 의도로그 + 0.15 × 인기도`
 - **개인화 결합 스코어**: `0.35 × BM25 + 0.30 × 의도로그 + 0.15 × 인기도 + 0.20 × 개인 취향`
 - **장기 메모리**: 기본값은 SQLAlchemy DB의 `chatbot_memories` 테이블이며, `CHATBOT_MEMORY_BACKEND=memory` 설정 시 인메모리만 사용
+- **Intent 라우팅**: 식당 추천, 취향 프로필 조회, 향후 커뮤니티 보조 기능을 분리하여 식당 추천을 챗봇의 독립 기능으로 유지
 - **피드백 루프**: 추천 카드의 좋아요/별로예요/저장 데이터를 프로필과 재랭킹에 반영
 - **추가 질문 흐름**: 지역만 있는 요청처럼 조건이 부족하면 메뉴/상황을 먼저 질문
 - **라면 맛집 의도 보정**: 오마카세 후식라면 매장은 '라면' 검색 로그에서 클릭·예약이 없으므로 의도 스코어가 낮아 자동 하위 랭크
