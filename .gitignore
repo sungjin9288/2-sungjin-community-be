@@ -54,3 +54,5 @@ uploads/*
 
 # Recommendation data (large CSV files — do not commit)
 data/*.csv
+data/chatbot_learning_logs*.jsonl
+data/chatbot_training_samples*.jsonl

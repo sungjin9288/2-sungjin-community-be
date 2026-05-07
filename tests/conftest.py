@@ -6,10 +6,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 TEST_DB_PATH = Path('/tmp/community-be-test.db')
+TEST_LEARNING_LOG_PATH = Path('/tmp/community-be-chatbot-learning.jsonl')
 os.environ['DATABASE_URL'] = f'sqlite:///{TEST_DB_PATH}'
+os.environ['CHATBOT_LEARNING_LOG_PATH'] = str(TEST_LEARNING_LOG_PATH)
 
 if TEST_DB_PATH.exists():
     TEST_DB_PATH.unlink()
+if TEST_LEARNING_LOG_PATH.exists():
+    TEST_LEARNING_LOG_PATH.unlink()
 
 from app.database import SessionLocal, engine
 from app.db_models import (

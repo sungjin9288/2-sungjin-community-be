@@ -20,6 +20,7 @@ from typing import Any
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.chatbot.chatbot_chain import chatbot_chain
+from app.chatbot.learning_log import learning_log_writer
 from app.chatbot.personalization import (
     clarification_suggestions,
     clarification_question,
@@ -38,6 +39,25 @@ logger = logging.getLogger(__name__)
 RECOMMEND_TOP_K = 5
 
 
+def _record_chat_learning_event(
+    *,
+    session_id: str,
+    user_message: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    learning_log_writer.record_chat(
+        session_id=session_id,
+        message=user_message,
+        reply=str(payload.get("reply") or ""),
+        recommended=payload.get("recommended") or [],
+        profile=payload.get("profile") or {},
+        profile_summary=str(payload.get("profile_summary") or ""),
+        clarification=bool(payload.get("clarification")),
+        next_questions=payload.get("next_questions") or [],
+    )
+    return payload
+
+
 def _chat_payload(
     user_message: str,
     session_id: str = "default",
@@ -52,6 +72,32 @@ def _chat_payload(
 
     logger.info("챗봇 요청 (session=%s): %r", session_id, user_message[:80])
 
+    if not is_food_related(user_message):
+        stored_profile = personalization_store.get_profile(session_id)
+        summary = profile_summary(stored_profile)
+        reply = chatbot_chain.chat(
+            user_message=user_message,
+            recommended_shops=[],
+            session_id=session_id,
+            preference_summary=summary,
+        )
+        return _record_chat_learning_event(
+            session_id=session_id,
+            user_message=user_message,
+            payload={
+                "reply": reply,
+                "recommended": [],
+                "profile": stored_profile,
+                "profile_summary": summary,
+                "clarification": False,
+                "next_questions": [
+                    "강남 데이트 파스타 추천해줘",
+                    "강남 회식 고기집 추천해줘",
+                    "라면 맛집 추천해줘",
+                ],
+            },
+        )
+
     current_profile = extract_preferences(user_message)
     merged_profile = personalization_store.update_from_message(
         session_id=session_id,
@@ -60,7 +106,7 @@ def _chat_payload(
     )
     summary = profile_summary(merged_profile)
 
-    if is_food_related(user_message) and should_ask_clarification(
+    if should_ask_clarification(
         user_message,
         merged_profile,
         current_profile=current_profile,
@@ -70,18 +116,22 @@ def _chat_payload(
             message=user_message,
             current_profile=current_profile,
         )
-        return {
-            "reply": question,
-            "recommended": [],
-            "profile": merged_profile,
-            "profile_summary": summary,
-            "clarification": True,
-            "next_questions": clarification_suggestions(
-                merged_profile,
-                message=user_message,
-                current_profile=current_profile,
-            ),
-        }
+        return _record_chat_learning_event(
+            session_id=session_id,
+            user_message=user_message,
+            payload={
+                "reply": question,
+                "recommended": [],
+                "profile": merged_profile,
+                "profile_summary": summary,
+                "clarification": True,
+                "next_questions": clarification_suggestions(
+                    merged_profile,
+                    message=user_message,
+                    current_profile=current_profile,
+                ),
+            },
+        )
 
     # 추천 엔진 실행
     recommended: list[dict] = []
@@ -111,18 +161,22 @@ def _chat_payload(
 
     logger.info("챗봇 응답 완료 (추천 %d개)", len(recommended))
 
-    return {
-        "reply": reply,
-        "recommended": recommended,
-        "profile": merged_profile,
-        "profile_summary": summary,
-        "clarification": False,
-        "next_questions": [
-            "더 저렴한 곳으로 다시 추천해줘",
-            "비슷하지만 분위기 좋은 곳으로 바꿔줘",
-            "저장한 취향 기준으로 다시 골라줘",
-        ],
-    }
+    return _record_chat_learning_event(
+        session_id=session_id,
+        user_message=user_message,
+        payload={
+            "reply": reply,
+            "recommended": recommended,
+            "profile": merged_profile,
+            "profile_summary": summary,
+            "clarification": False,
+            "next_questions": [
+                "더 저렴한 곳으로 다시 추천해줘",
+                "비슷하지만 분위기 좋은 곳으로 바꿔줘",
+                "저장한 취향 기준으로 다시 골라줘",
+            ],
+        },
+    )
 
 
 def chat(
@@ -165,6 +219,15 @@ def record_feedback(
     shop: dict[str, Any] | None = None,
 ) -> JSONResponse:
     result = personalization_store.record_feedback(session_id, shop_id, action, shop)
+    learning_log_writer.record_feedback(
+        session_id=session_id,
+        shop_id=shop_id,
+        action=action,
+        shop=shop,
+        profile=result.get("profile") or {},
+        profile_summary=profile_summary(result.get("profile") or {}),
+        feedback_counts=result.get("feedback_counts") or {},
+    )
     return ok(message="feedback_recorded", data=result)
 
 

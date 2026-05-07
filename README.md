@@ -173,7 +173,14 @@ python scripts/preprocess_logs.py --force
 
 # 샘플 로그 기준 NDCG/MRR/latency 측정
 python scripts/evaluate_recommendation.py --max-rows 100000 --max-queries 20 --top-k 5
+
+# 챗봇 피드백 로그를 랭킹 학습 샘플로 변환
+python scripts/export_chatbot_learning_dataset.py \
+  --input data/chatbot_learning_logs.jsonl \
+  --output data/chatbot_training_samples.jsonl
 ```
+
+학습 데이터 수집과 모델 고도화 절차는 `docs/chatbot_ai_training_guide.md`를 참고한다.
 
 ### LLM 설정
 `LLM_PROVIDER` 환경변수로 실시간 전환 가능:

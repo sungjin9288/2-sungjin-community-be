@@ -68,7 +68,14 @@ AVOID_KEYWORDS = (
 )
 
 FOOD_KEYWORDS = set(CUISINE_KEYWORDS) | {
-    "식당", "맛집", "추천", "밥", "음식", "먹", "레스토랑", "메뉴", "맛",
+    "식당", "맛집", "밥", "음식", "먹", "레스토랑", "메뉴", "맛",
+}
+GENERIC_RECOMMENDATION_KEYWORDS = {
+    "추천", "찾아", "찾고", "골라", "어디", "뭐 먹", "먹을까",
+}
+OUT_OF_SCOPE_KEYWORDS = {
+    "주가", "주식", "삼성전자", "코인", "비트코인", "환율", "부동산",
+    "날씨", "정치", "선거", "전망", "대출", "보험", "병원", "의사",
 }
 SINGLE_TOKEN_PATTERNS = {
     "회": re.compile(r"(^|[^가-힣])회($|[^가-힣])|횟집|생선회"),
@@ -169,7 +176,19 @@ def extract_preferences(message: str) -> dict[str, Any]:
 
 def is_food_related(message: str) -> bool:
     text = str(message or "")
-    return any(_contains_keyword(text, keyword) for keyword in FOOD_KEYWORDS | set(REGION_KEYWORDS) | set(SITUATION_KEYWORDS))
+    has_food_keyword = any(_contains_keyword(text, keyword) for keyword in FOOD_KEYWORDS)
+    has_place_or_situation = any(
+        _contains_keyword(text, keyword)
+        for keyword in set(REGION_KEYWORDS) | set(SITUATION_KEYWORDS)
+    )
+    has_recommendation_intent = any(keyword in text for keyword in GENERIC_RECOMMENDATION_KEYWORDS)
+    has_out_of_scope_signal = any(keyword in text for keyword in OUT_OF_SCOPE_KEYWORDS)
+
+    if has_out_of_scope_signal and not has_food_keyword:
+        return False
+    if has_food_keyword:
+        return True
+    return has_place_or_situation and has_recommendation_intent
 
 
 def missing_slots(message: str, profile: dict[str, Any]) -> list[str]:

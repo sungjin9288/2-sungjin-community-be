@@ -1,3 +1,5 @@
+import json
+
 from app.chatbot.personalization import personalization_store
 from app.db_models import ChatbotMemory
 from app.database import SessionLocal
@@ -49,6 +51,45 @@ def test_chatbot_ranks_specific_food_request_without_clarification(client):
     payload = res.json()["data"]
     assert payload["clarification"] is False
     assert isinstance(payload["recommended"], list)
+
+
+def test_chatbot_prioritizes_explicit_cuisine_matches(client):
+    res = client.post(
+        "/chatbot/chat",
+        json={
+            "message": "강남 데이트 파스타 맛집 추천해줘",
+            "session_id": "pytest_chatbot_explicit_pasta",
+        },
+    )
+
+    assert res.status_code == 200
+    payload = res.json()["data"]
+    assert payload["clarification"] is False
+    for shop in payload["recommended"]:
+        text = " ".join(
+            [
+                " ".join(shop.get("categories") or []),
+                " ".join(shop.get("menus") or []),
+            ]
+        )
+        assert any(keyword in text for keyword in ["파스타", "이탈리아", "이탈리안"])
+
+
+def test_chatbot_rejects_out_of_scope_stock_request(client):
+    res = client.post(
+        "/chatbot/chat",
+        json={
+            "message": "삼성전자 주가 좀 전망해줘",
+            "session_id": "pytest_chatbot_stock",
+        },
+    )
+
+    assert res.status_code == 200
+    payload = res.json()["data"]
+    assert payload["clarification"] is False
+    assert payload["recommended"] == []
+    assert "식당 추천 봇" in payload["reply"]
+    assert payload["profile"]["regions"] == []
 
 
 def test_chatbot_does_not_extract_sashimi_from_hwesik(client):
@@ -127,6 +168,65 @@ def test_chatbot_profile_and_feedback_lifecycle(client):
 
     reset_res = client.post("/chatbot/reset", json={"session_id": session_id})
     assert reset_res.status_code == 200
+
+
+def test_chatbot_writes_learning_log_for_chat_and_feedback(client, tmp_path, monkeypatch):
+    log_path = tmp_path / "chatbot_learning.jsonl"
+    monkeypatch.setenv("CHATBOT_LEARNING_LOG_PATH", str(log_path))
+    session_id = "pytest_chatbot_learning_log"
+
+    chat_res = client.post(
+        "/chatbot/chat",
+        json={
+            "message": "강남 데이트 파스타 맛집 추천해줘",
+            "session_id": session_id,
+        },
+    )
+    assert chat_res.status_code == 200
+
+    feedback_res = client.post(
+        "/chatbot/feedback",
+        json={
+            "session_id": session_id,
+            "shop_id": "pytest-shop-learning",
+            "action": "like",
+            "shop": {
+                "shop_id": "pytest-shop-learning",
+                "shop_name": "테스트 파스타",
+                "categories": ["파스타"],
+                "score": 0.91,
+                "score_breakdown": {
+                    "bm25": 0.8,
+                    "intent": 0.7,
+                    "popularity": 0.2,
+                    "personal": 0.5,
+                },
+                "reasons": ["검색어와 매장 정보가 잘 맞음"],
+            },
+        },
+    )
+    assert feedback_res.status_code == 200
+
+    events = [
+        json.loads(line)
+        for line in log_path.read_text(encoding="utf-8").splitlines()
+    ]
+    chat_event = next(
+        event
+        for event in events
+        if event["event_type"] == "chat" and event["session_id"] == session_id
+    )
+    feedback_event = next(
+        event
+        for event in events
+        if event["event_type"] == "feedback" and event["session_id"] == session_id
+    )
+
+    assert chat_event["message"] == "강남 데이트 파스타 맛집 추천해줘"
+    assert "profile" in chat_event
+    assert isinstance(chat_event["recommendations"], list)
+    assert feedback_event["action"] == "like"
+    assert feedback_event["shop"]["score_breakdown"]["bm25"] == 0.8
 
 
 def test_chatbot_profile_persists_in_database(client):

@@ -152,7 +152,7 @@ class ChatbotChain:
     def initialize(self) -> None:
         self._llm = _build_llm(self._provider)
         if self._llm is None:
-            self._initialized = False
+            self._initialized = True
             logger.info("챗봇 mock 모드로 동작")
             return
 

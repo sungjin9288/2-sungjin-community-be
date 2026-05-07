@@ -38,6 +38,18 @@ EVENT_WEIGHTS: dict[str, float] = {
 }
 DEFAULT_TOP_K = 5
 LOG_CACHE_VERSION = 2
+CUISINE_ALIASES: dict[str, tuple[str, ...]] = {
+    "파스타": ("파스타", "이탈리아", "이탈리안"),
+    "이탈리아": ("이탈리아", "이탈리안", "파스타", "피자"),
+    "고기": ("고기", "소고기", "돼지고기", "삼겹살", "갈비", "스테이크", "바비큐", "육류"),
+    "평냉": ("평냉", "냉면", "평양냉면"),
+    "냉면": ("냉면", "평냉", "평양냉면"),
+    "라면": ("라면", "라멘"),
+    "라멘": ("라멘", "라면"),
+    "스시": ("스시", "초밥", "일식"),
+    "초밥": ("초밥", "스시", "일식"),
+    "카페": ("카페", "커피", "디저트", "브런치", "베이커리"),
+}
 
 # ─── 형태소 분석 (kiwipiepy 우선, fallback: 공백 분리) ────────────────────── #
 try:
@@ -371,6 +383,11 @@ class RecommendationEngine:
             return [values]
         return [str(value) for value in values if str(value or "").strip()] if isinstance(values, list) else []
 
+    @staticmethod
+    def _matches_cuisine(text: str, cuisine: str) -> bool:
+        aliases = CUISINE_ALIASES.get(cuisine, (cuisine,))
+        return any(alias.lower() in text for alias in aliases)
+
     def _personal_score(
         self,
         shop: ShopRecord,
@@ -543,14 +560,21 @@ class RecommendationEngine:
             for region in self._list_profile(profile, "regions")
             if region and region in str(query)
         ]
+        explicit_cuisines = [
+            cuisine
+            for cuisine in self._list_profile(profile, "cuisines")
+            if cuisine and cuisine in str(query)
+        ]
 
         # 5) 결합 스코어
         if has_personal_context:
+            ranking_formula = "0.35*search_match + 0.30*intent_log + 0.15*popularity + 0.20*personal_preference"
             combined = [
                 0.35 * b + 0.30 * i + 0.15 * p + 0.20 * ps
                 for b, i, p, ps in zip(bm25_norm, intent, pop, personal)
             ]
         else:
+            ranking_formula = "0.45*search_match + 0.40*intent_log + 0.15*popularity"
             combined = [
                 0.45 * b + 0.40 * i + 0.15 * p
                 for b, i, p in zip(bm25_norm, intent, pop)
@@ -569,6 +593,21 @@ class RecommendationEngine:
                 for idx, score in enumerate(combined)
             ]
 
+        if explicit_cuisines:
+            cuisine_matches = [
+                any(self._matches_cuisine(self._shop_text(shop), cuisine) for cuisine in explicit_cuisines)
+                for shop in self._shops
+            ]
+            matched_count = sum(1 for matched in cuisine_matches if matched)
+            if matched_count == 0:
+                logger.info("명시 메뉴에 맞는 매장 없음: %s", ", ".join(explicit_cuisines))
+                return []
+            penalty = 0.0 if matched_count >= top_k else 0.2
+            combined = [
+                score if cuisine_matches[idx] else score * penalty
+                for idx, score in enumerate(combined)
+            ]
+
         # 6) top_k + 다양화
         ranked = sorted(range(n), key=lambda i: combined[i], reverse=True)
         selected = (
@@ -577,7 +616,7 @@ class RecommendationEngine:
             else ranked[:top_k]
         )
         results = []
-        for idx in selected:
+        for rank, idx in enumerate(selected, start=1):
             score = combined[idx]
             if score <= 0:
                 break
@@ -590,6 +629,7 @@ class RecommendationEngine:
                 "personal": round(personal[idx], 4),
             }
             results.append({
+                "rank": rank,
                 "shop_id": s.shop_id,
                 "shop_name": s.shop_name,
                 "address": s.address,
@@ -599,6 +639,7 @@ class RecommendationEngine:
                 "awards": s.awards,
                 "score": round(score, 4),
                 "score_breakdown": score_breakdown,
+                "ranking_formula": ranking_formula,
                 "reasons": self._score_reasons(
                     bm25_norm[idx],
                     intent[idx],
