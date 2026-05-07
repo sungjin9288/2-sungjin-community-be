@@ -100,6 +100,20 @@ label 규칙:
      --min-improvement 0.0001
    ```
 
+   실제 반복 실행은 아래 파이프라인 명령을 권장합니다.
+
+   ```bash
+   python scripts/run_chatbot_rank_training_pipeline.py \
+     --max-rows 500000 \
+     --max-queries 200 \
+     --candidate-k 50 \
+     --top-k 5 \
+     --step 0.1 \
+     --promote-min-samples 100 \
+     --promote-min-groups 3 \
+     --promote-min-improvement 0.0001
+   ```
+
 2. **Learning-to-Rank 모델**
    - 후보: LightGBM LambdaRank, XGBoost rank:pairwise
    - 입력 피처: `bm25`, `intent`, `popularity`, `personal`, `rank`, `category_count`, `menu_count`

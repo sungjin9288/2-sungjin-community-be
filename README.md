@@ -211,6 +211,17 @@ python scripts/promote_chatbot_rank_weights.py \
   --min-samples 100 \
   --min-groups 3 \
   --min-improvement 0.0001
+
+# 위 학습셋 생성/튜닝/promotion 과정을 한 번에 실행
+python scripts/run_chatbot_rank_training_pipeline.py \
+  --max-rows 500000 \
+  --max-queries 200 \
+  --candidate-k 50 \
+  --top-k 5 \
+  --step 0.1 \
+  --promote-min-samples 100 \
+  --promote-min-groups 3 \
+  --promote-min-improvement 0.0001
 ```
 
 서버는 기본적으로 `data/chatbot_rank_weight_report.json`이 있으면 추천 가중치 artifact로 읽는다. 다른 경로를 쓰려면 `CHATBOT_RANK_WEIGHT_PATH=/path/to/report.json`을 지정한다. artifact가 없거나 `status != "ok"`이면 기존 기본 가중치로 fallback한다.
