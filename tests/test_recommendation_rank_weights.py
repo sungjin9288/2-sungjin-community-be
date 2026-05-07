@@ -30,6 +30,9 @@ def test_rank_weight_artifact_preserves_personal_budget_without_personal_feature
         "personal": 0.2,
     }
     assert engine.rank_weight_source == "artifact.json"
+    assert engine.rank_weight_info["source"] == "artifact.json"
+    assert engine.rank_weight_info["active_features"] == ["bm25", "intent", "popularity"]
+    assert engine.rank_weight_info["base_weights"]["bm25"] == 0.6
 
 
 def test_rank_weight_artifact_uses_personal_weight_when_feature_is_active():
@@ -81,6 +84,43 @@ def test_rank_weight_artifact_loader_falls_back_for_inactive_report(tmp_path):
     assert engine._base_rank_weights == DEFAULT_BASE_RANK_WEIGHTS
     assert engine._personal_rank_weights == DEFAULT_PERSONAL_RANK_WEIGHTS
     assert engine.rank_weight_source == "default"
+
+
+def test_rank_weight_artifact_loader_exposes_promotion_metadata(tmp_path):
+    artifact = tmp_path / "rank_weight_report.json"
+    artifact.write_text(
+        json.dumps(
+            {
+                "status": "ok",
+                "top_k": 5,
+                "samples": 270,
+                "eligible_groups": 9,
+                "active_features": ["bm25", "intent", "popularity"],
+                "best_weights": {"bm25": 0.6, "intent": 0.4, "popularity": 0.0, "personal": 0.0},
+                "baseline_metrics": {"ndcg@5": 0.4644},
+                "best_metrics": {"ndcg@5": 0.4942},
+                "promotion": {
+                    "status": "promoted",
+                    "metric": "ndcg@5",
+                    "improvement": 0.0298,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    engine = RecommendationEngine()
+    assert engine._load_rank_weight_artifact(str(artifact)) is True
+    info = engine.rank_weight_info
+
+    assert info["status"] == "artifact"
+    assert info["source"] == str(artifact)
+    assert info["samples"] == 270
+    assert info["eligible_groups"] == 9
+    assert info["baseline_metrics"]["ndcg@5"] == 0.4644
+    assert info["best_metrics"]["ndcg@5"] == 0.4942
+    assert info["promotion"]["status"] == "promoted"
+    assert info["promotion"]["improvement"] == 0.0298
 
 
 def test_recommendation_engine_load_handles_missing_csvs(monkeypatch, tmp_path):

@@ -146,6 +146,7 @@ def get_status():
                 "ready": recommendation_engine.is_ready(),
                 "shop_count": recommendation_engine.shop_count,
                 "rank_weight_source": recommendation_engine.rank_weight_source,
+                "rank_weights": recommendation_engine.rank_weight_info,
             },
             "chatbot": {
                 "provider": chatbot_chain._provider,

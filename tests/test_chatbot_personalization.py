@@ -47,6 +47,9 @@ def test_chatbot_status_exposes_rank_weight_source(client):
     engine_status = res.json()["data"]["recommendation_engine"]
     assert "rank_weight_source" in engine_status
     assert isinstance(engine_status["rank_weight_source"], str)
+    assert engine_status["rank_weights"]["source"] == engine_status["rank_weight_source"]
+    assert "base_weights" in engine_status["rank_weights"]
+    assert "personal_weights" in engine_status["rank_weights"]
 
 
 def test_chatbot_clarifies_region_only_request(client):

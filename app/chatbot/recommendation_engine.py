@@ -269,6 +269,8 @@ class RecommendationEngine:
         self._base_rank_weights = DEFAULT_BASE_RANK_WEIGHTS.copy()
         self._personal_rank_weights = DEFAULT_PERSONAL_RANK_WEIGHTS.copy()
         self._rank_weight_source = "default"
+        self._rank_weight_metadata: dict[str, Any] = {}
+        self._reset_rank_weights()
         self._loaded = False
 
     def load(
@@ -360,6 +362,13 @@ class RecommendationEngine:
         self._base_rank_weights = DEFAULT_BASE_RANK_WEIGHTS.copy()
         self._personal_rank_weights = DEFAULT_PERSONAL_RANK_WEIGHTS.copy()
         self._rank_weight_source = "default"
+        self._rank_weight_metadata = {
+            "status": "default",
+            "source": "default",
+            "active_features": [],
+            "base_weights": self._base_rank_weights.copy(),
+            "personal_weights": self._personal_rank_weights.copy(),
+        }
 
     def _apply_rank_weights(
         self,
@@ -409,6 +418,13 @@ class RecommendationEngine:
             self._personal_rank_weights["personal"] = personal_budget
 
         self._rank_weight_source = source
+        self._rank_weight_metadata = {
+            "status": "applied",
+            "source": source,
+            "active_features": list(active),
+            "base_weights": self._base_rank_weights.copy(),
+            "personal_weights": self._personal_rank_weights.copy(),
+        }
         return True
 
     def _load_rank_weight_artifact(self, path: str) -> bool:
@@ -446,6 +462,17 @@ class RecommendationEngine:
             source=str(p),
         )
         if applied:
+            self._rank_weight_metadata.update({
+                "status": "artifact",
+                "source": str(p),
+                "top_k": payload.get("top_k"),
+                "samples": payload.get("samples"),
+                "eligible_groups": payload.get("eligible_groups"),
+                "baseline_metrics": payload.get("baseline_metrics") or {},
+                "best_metrics": payload.get("best_metrics") or {},
+                "best_weights": payload.get("best_weights") or {},
+                "promotion": payload.get("promotion") if isinstance(payload.get("promotion"), dict) else {},
+            })
             logger.info(
                 "랭킹 가중치 artifact 적용: %s (base=%s, personal=%s)",
                 path,
@@ -823,6 +850,23 @@ class RecommendationEngine:
     @property
     def rank_weight_source(self) -> str:
         return self._rank_weight_source
+
+    @property
+    def rank_weight_info(self) -> dict[str, Any]:
+        return {
+            "status": self._rank_weight_metadata.get("status", "default"),
+            "source": self._rank_weight_source,
+            "active_features": list(self._rank_weight_metadata.get("active_features") or []),
+            "base_weights": self._base_rank_weights.copy(),
+            "personal_weights": self._personal_rank_weights.copy(),
+            "top_k": self._rank_weight_metadata.get("top_k"),
+            "samples": self._rank_weight_metadata.get("samples"),
+            "eligible_groups": self._rank_weight_metadata.get("eligible_groups"),
+            "baseline_metrics": dict(self._rank_weight_metadata.get("baseline_metrics") or {}),
+            "best_metrics": dict(self._rank_weight_metadata.get("best_metrics") or {}),
+            "best_weights": dict(self._rank_weight_metadata.get("best_weights") or {}),
+            "promotion": dict(self._rank_weight_metadata.get("promotion") or {}),
+        }
 
 
 # 싱글턴
