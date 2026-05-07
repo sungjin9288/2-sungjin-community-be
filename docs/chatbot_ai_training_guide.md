@@ -29,6 +29,18 @@ python scripts/export_chatbot_learning_dataset.py \
   --output data/chatbot_training_samples.jsonl
 ```
 
+초기에는 추천 카드 피드백이 부족할 수 있습니다. 이때는 기존 행동 로그의 `click/view/bookmark/reservation` 가중치를 query별 relevance label로 사용해 weak-label 학습셋을 먼저 만듭니다.
+
+```bash
+python scripts/build_recommendation_training_dataset.py \
+  --max-rows 500000 \
+  --max-queries 200 \
+  --candidate-k 50 \
+  --output data/recommendation_training_samples.jsonl
+```
+
+이 데이터는 실제 챗봇 피드백이 쌓이기 전의 초기 랭킹 실험용입니다. 운영 피드백이 충분해지면 `data/chatbot_training_samples.jsonl`을 우선 사용하고, 행동 로그 기반 샘플은 보조 검증셋으로 둡니다.
+
 label 규칙:
 
 | 사용자 행동 | label |
@@ -61,19 +73,19 @@ label 규칙:
 
 1. **가중치 튜닝**
    - 현재 공식: `BM25`, `intent_log`, `popularity`, `personal`
-   - `data/chatbot_training_samples.jsonl`에서 positive/negative label을 기준으로 grid search
+   - `data/recommendation_training_samples.jsonl` 또는 `data/chatbot_training_samples.jsonl`에서 positive/negative label을 기준으로 grid search
    - 목표: NDCG@5, MRR@5 개선
 
    ```bash
    python scripts/tune_chatbot_rank_weights.py \
-     --input data/chatbot_training_samples.jsonl \
+     --input data/recommendation_training_samples.jsonl \
      --output data/chatbot_rank_weight_report.json \
      --top-k 5 \
      --step 0.1 \
      --min-groups 3
    ```
 
-   결과가 `status: "insufficient_data"`이면 query별 positive/negative 후보가 부족한 상태입니다. 추천 카드의 `좋아요`, `저장`, `별로예요` 피드백을 더 수집한 뒤 다시 실행합니다.
+   결과가 `status: "insufficient_data"`이면 query별 positive/negative 후보가 부족한 상태입니다. 추천 카드의 `좋아요`, `저장`, `별로예요` 피드백을 더 수집한 뒤 다시 실행합니다. 행동 로그 기반 학습셋처럼 `personal` 값이 모두 0인 피처는 튜닝 대상에서 자동 제외됩니다.
 
 2. **Learning-to-Rank 모델**
    - 후보: LightGBM LambdaRank, XGBoost rank:pairwise

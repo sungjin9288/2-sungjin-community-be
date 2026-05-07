@@ -85,9 +85,20 @@ def evaluate_recommendation(
     if not logs_path.exists():
         raise FileNotFoundError(f"logs.csv 없음: {logs_path}")
 
+    previous_env = {
+        "SHOPS_CSV_PATH": os.environ.get("SHOPS_CSV_PATH"),
+        "LOG_CACHE_PATH": os.environ.get("LOG_CACHE_PATH"),
+    }
     os.environ["SHOPS_CSV_PATH"] = shops_path
     os.environ["LOG_CACHE_PATH"] = cache_path
-    recommendation_engine.load(shops_path=shops_path, logs_path=str(logs_path))
+    try:
+        recommendation_engine.load(shops_path=shops_path, logs_path=str(logs_path))
+    finally:
+        for key, value in previous_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
     logs_df = _read_logs(logs_path, max_rows)
     events = _propagate_queries_and_aggregate(logs_df)

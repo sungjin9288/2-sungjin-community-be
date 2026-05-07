@@ -126,6 +126,35 @@ def test_tune_chatbot_rank_weights_handles_insufficient_data(tmp_path):
     assert report["eligible_groups"] == 0
 
 
+def test_tune_chatbot_rank_weights_excludes_inactive_features(tmp_path):
+    input_path = tmp_path / "training.jsonl"
+    samples = [
+        {
+            "query": "강남 파스타",
+            "shop_id": "positive-a",
+            "label": 1.0,
+            "features": {"bm25": 0.9, "intent": 0.2, "popularity": 0.1, "personal": 0.0},
+        },
+        {
+            "query": "강남 파스타",
+            "shop_id": "negative-a",
+            "label": 0.0,
+            "features": {"bm25": 0.1, "intent": 0.8, "popularity": 0.2, "personal": 0.0},
+        },
+    ]
+    input_path.write_text(
+        "\n".join(json.dumps(sample, ensure_ascii=False) for sample in samples),
+        encoding="utf-8",
+    )
+
+    report = tune_rank_weights(input_path, top_k=1, step=0.5, min_groups=1)
+
+    assert report["status"] == "ok"
+    assert "personal" not in report["active_features"]
+    assert report["best_weights"]["personal"] == 0.0
+    assert report["comparable_baseline_weights"]["personal"] == 0.0
+
+
 def test_recommendation_evaluation_metrics_are_stable():
     assert _percentile([4, 1, 3, 2], 50) == 2
     assert _percentile([4, 1, 3, 2], 95) == 4

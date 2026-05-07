@@ -187,9 +187,16 @@ python scripts/export_chatbot_learning_dataset.py \
   --input data/chatbot_learning_logs.jsonl \
   --output data/chatbot_training_samples.jsonl
 
-# 피드백 학습 샘플로 개인화 랭킹 가중치 실험
+# 초기 피드백이 부족하면 기존 행동 로그로 weak-label 학습 샘플 생성
+python scripts/build_recommendation_training_dataset.py \
+  --max-rows 500000 \
+  --max-queries 200 \
+  --candidate-k 50 \
+  --output data/recommendation_training_samples.jsonl
+
+# 학습 샘플로 개인화 랭킹 가중치 실험
 python scripts/tune_chatbot_rank_weights.py \
-  --input data/chatbot_training_samples.jsonl \
+  --input data/recommendation_training_samples.jsonl \
   --output data/chatbot_rank_weight_report.json \
   --top-k 5 \
   --step 0.1 \

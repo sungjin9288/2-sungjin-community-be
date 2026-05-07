@@ -134,25 +134,60 @@ def _evaluate_weights(
     }
 
 
-def _weight_grid(step: float) -> list[dict[str, float]]:
+def _active_features(groups: dict[str, list[dict[str, Any]]]) -> tuple[str, ...]:
+    active: list[str] = []
+    for feature in FEATURES:
+        values: list[float] = []
+        for rows in groups.values():
+            for row in rows:
+                features = row.get("features") if isinstance(row.get("features"), dict) else {}
+                values.append(_numeric(features.get(feature)))
+        if values and max(values) > min(values):
+            active.append(feature)
+    return tuple(active)
+
+
+def _normalise_weights_for_features(
+    weights: dict[str, float],
+    active_features: tuple[str, ...],
+) -> dict[str, float]:
+    if not active_features:
+        return {feature: 0.0 for feature in FEATURES}
+    total = sum(weights.get(feature, 0.0) for feature in active_features)
+    if total <= 0:
+        return {
+            feature: round(1.0 / len(active_features), 6) if feature in active_features else 0.0
+            for feature in FEATURES
+        }
+    return {
+        feature: round(weights.get(feature, 0.0) / total, 6) if feature in active_features else 0.0
+        for feature in FEATURES
+    }
+
+
+def _weight_grid(step: float, active_features: tuple[str, ...] = FEATURES) -> list[dict[str, float]]:
     if step <= 0 or step > 1:
         raise ValueError("--step must be in (0, 1]")
     units = round(1.0 / step)
     if not math.isclose(units * step, 1.0, abs_tol=1e-9):
         raise ValueError("--step must divide 1.0 exactly, e.g. 0.5, 0.25, 0.2, 0.1")
+    if not active_features:
+        return []
 
     grid: list[dict[str, float]] = []
-    for bm25 in range(units + 1):
-        for intent in range(units - bm25 + 1):
-            for popularity in range(units - bm25 - intent + 1):
-                personal = units - bm25 - intent - popularity
-                values = [bm25, intent, popularity, personal]
-                grid.append(
-                    {
-                        feature: round(value * step, 6)
-                        for feature, value in zip(FEATURES, values, strict=True)
-                    }
-                )
+
+    def walk(remaining_units: int, depth: int, values: list[int]) -> None:
+        if depth == len(active_features) - 1:
+            active_weights = {
+                feature: round(value * step, 6)
+                for feature, value in zip(active_features, [*values, remaining_units], strict=True)
+            }
+            grid.append({feature: active_weights.get(feature, 0.0) for feature in FEATURES})
+            return
+        for value in range(remaining_units + 1):
+            walk(remaining_units - value, depth + 1, [*values, value])
+
+    walk(units, 0, [])
     return grid
 
 
@@ -166,12 +201,14 @@ def tune_rank_weights(
 ) -> dict[str, Any]:
     samples = _read_samples(input_path)
     groups = _eligible_groups(_group_samples(samples))
+    active_features = _active_features(groups)
     report: dict[str, Any] = {
         "input": str(input_path),
         "samples": len(samples),
         "eligible_groups": len(groups),
         "top_k": top_k,
         "step": step,
+        "active_features": list(active_features),
         "baseline_weights": BASELINE_WEIGHTS,
     }
 
@@ -185,9 +222,20 @@ def tune_rank_weights(
                 "best_metrics": {},
             }
         )
+    elif not active_features:
+        report.update(
+            {
+                "status": "insufficient_data",
+                "reason": "no_active_feature_variance",
+                "baseline_metrics": {},
+                "best_weights": None,
+                "best_metrics": {},
+            }
+        )
     else:
-        baseline_metrics = _evaluate_weights(groups, BASELINE_WEIGHTS, top_k)
-        best_weights = BASELINE_WEIGHTS
+        comparable_baseline = _normalise_weights_for_features(BASELINE_WEIGHTS, active_features)
+        baseline_metrics = _evaluate_weights(groups, comparable_baseline, top_k)
+        best_weights = comparable_baseline
         best_metrics = baseline_metrics
         best_key = (
             best_metrics[f"ndcg@{top_k}"],
@@ -195,7 +243,7 @@ def tune_rank_weights(
             best_metrics[f"hit_rate@{top_k}"],
         )
 
-        for weights in _weight_grid(step):
+        for weights in _weight_grid(step, active_features):
             metrics = _evaluate_weights(groups, weights, top_k)
             key = (
                 metrics[f"ndcg@{top_k}"],
@@ -210,6 +258,7 @@ def tune_rank_weights(
         report.update(
             {
                 "status": "ok",
+                "comparable_baseline_weights": comparable_baseline,
                 "baseline_metrics": baseline_metrics,
                 "best_weights": best_weights,
                 "best_metrics": best_metrics,
