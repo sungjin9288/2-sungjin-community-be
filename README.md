@@ -126,8 +126,8 @@ This backend repository owns the following responsibilities:
 - uploads mount for image delivery
 - Lambda container entrypoint for image-oriented runtime packaging
 
-### Restaurant Chatbot / 식당 추천 챗봇 *(신규)*
-- `POST /chatbot/chat` — 식당 추천 챗봇 대화
+### Chatbot / 커뮤니키 어시스턴트 *(신규)*
+- `POST /chatbot/chat` — 식당 추천, 커뮤니티 검색/요약 챗봇 대화
 - `POST /chatbot/chat/stream` — SSE 기반 스트리밍 응답
 - `POST /chatbot/feedback` — 추천 카드 좋아요/별로예요/저장 피드백 반영
 - `GET /chatbot/profile` — 세션별 장기 취향 프로필 조회
@@ -142,7 +142,8 @@ This backend repository owns the following responsibilities:
 POST /chatbot/chat
     ↓
 ChatbotController
-    ├── IntentRouter            (식당 추천 / 취향 프로필 / 계획된 커뮤니티 기능 분기)
+    ├── IntentRouter            (식당 추천 / 취향 프로필 / 커뮤니티 어시스턴트 분기)
+    ├── CommunityAssistant     (게시글 검색 + 북마크/알림/메시지 개인화 브리프)
     ├── PersonalizationStore   (DB-backed long-term preference memory)
     ├── RecommendationEngine   (BM25 + 행동 로그 + 개인화 랭킹)
     │     ├── kiwipiepy 형태소 분석
@@ -164,7 +165,8 @@ ChatbotController
 - **개인화 결합 스코어**: `0.35 × BM25 + 0.30 × 의도로그 + 0.15 × 인기도 + 0.20 × 개인 취향`
 - **장기 메모리**: 기본값은 SQLAlchemy DB의 `chatbot_memories` 테이블이며, `CHATBOT_MEMORY_BACKEND=memory` 설정 시 인메모리만 사용
 - **계정 기반 취향 저장**: 로그인 사용자는 `user:{id}` 메모리 키로 저장되어 브라우저/기기 세션이 달라도 같은 취향 프로필을 사용
-- **Intent 라우팅**: 식당 추천, 취향 프로필 조회, 향후 커뮤니티 보조 기능을 분리하여 식당 추천을 챗봇의 독립 기능으로 유지
+- **Intent 라우팅**: 식당 추천, 취향 프로필 조회, 커뮤니티 어시스턴트를 분리하여 기능별 응답 payload를 명확히 유지
+- **커뮤니티 개인화 브리프**: 로그인 사용자의 북마크 태그 선호도, 읽지 않은 알림/메시지, 최근 대화를 조합해 `community` payload로 반환
 - **피드백 루프**: 추천 카드의 좋아요/별로예요/저장 데이터를 프로필과 재랭킹에 반영
 - **추가 질문 흐름**: 지역만 있는 요청처럼 조건이 부족하면 메뉴/상황을 먼저 질문
 - **카드 단위 랭킹 근거**: `score_breakdown`, `score_contributions`, `score_adjustments`, `ranking_weight_source`를 응답에 포함해 최종 순위의 근거를 UI와 학습 로그가 재사용
@@ -375,6 +377,15 @@ curl -X POST http://localhost:8000/chatbot/chat \
 ```bash
 pytest -q
 ```
+
+테스트는 두 갈래로 구성됩니다 (실제 소스 카운트: `def test_` **47개** · `assert` **311개** · 7개 파일).
+
+| 그룹 | 파일 | 개수 | 검증 범위 |
+| --- | --- | --- | --- |
+| **API 통합 회귀** | `tests/test_api_regression.py` | 7 | 인증 토큰 수명주기, 비밀번호 변경, 게시글·태그·필터·트렌딩, 좋아요 멱등성, 잘못된 정렬 거부, DM 수명주기, 북마크·알림·차단·신고 |
+| **추천·챗봇 학습 파이프라인** | `test_recommendation_rank_weights.py` 등 6개 파일 | 40 | rank weight 학습·승격, 학습 데이터셋 빌드, 챗봇 개인화, 학습 결과 export, 학습 파이프라인 실행 |
+
+> 수치는 소스의 `def test_` / `assert` 개수를 직접 센 값입니다 (`grep -rE "def test_" tests | wc -l`). 각 테스트의 현재 pass 여부는 환경 구성 후 `pytest -q`로 재확인하세요.
 
 ### Health check
 ```bash
